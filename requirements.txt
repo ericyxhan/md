@@ -1,0 +1,9 @@
+# Simulation environment: OpenMM with the CUDA 12 platform.
+# CUDA 12 is compatible with Maxwell (GTX 9xx), Pascal, Volta, Turing,
+# Ampere, Ada, Hopper, and Blackwell GPUs. CUDA 13 drops Maxwell/Pascal/Volta.
+#
+# The OpenFF/SMIRNOFF parameterization stack is intentionally separate; see
+# environment-param.yml and create_param_env.sh.
+openmm[cuda12]==8.6.1
+pdbfixer==1.12.0
+requests==2.34.2

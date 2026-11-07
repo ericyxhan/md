@@ -1,0 +1,16 @@
+.venv/
+.param-env/
+.mamba/
+.tools/
+__pycache__/
+*.py[cod]
+my_downloads/
+outputs/
+input.pdb
+*.dcd
+*.chk
+.git/
+.gitignore
+Dockerfile
+.dockerignore
+docker-compose.yml

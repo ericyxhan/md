@@ -1,0 +1,161 @@
+# OpenMM protein + ligand workflow.
+#
+# Paths are relative to this file unless they are absolute.
+# Run with:
+#   python simulate.py --config config.toml
+#
+# Inspect the resolved plan without writing anything:
+#   python simulate.py --config config.toml --dry-run
+
+# ---------------------------------------------------------------------------
+# Run settings
+# ---------------------------------------------------------------------------
+
+[run]
+output_dir = "outputs"
+platform = "CUDA"
+# For a CPU smoke test, use:
+#   python simulate.py --config config.toml --platform CPU
+
+# Optional OpenMM platform properties.  Values must be strings.
+[run.platform_properties]
+# Precision = "mixed"
+# DeviceIndex = "0"
+
+# ---------------------------------------------------------------------------
+# Input
+# ---------------------------------------------------------------------------
+
+[input]
+# Option A: one complex file containing the protein and its ligands.
+# complex = "7YAE.pdb"
+
+# Option B: a protein file plus separate ligand files.
+# protein = "protein.pdb"
+# ligands = ["ligand.sdf", "ligand.mol2"]
+
+# Option C: download from RCSB by four-character PDB ID.
+pdb_id = "7YAE"
+
+# ---------------------------------------------------------------------------
+# Parameterization (runs in the separate CPU environment)
+# ---------------------------------------------------------------------------
+
+[parameterization]
+# Interpreter that can import OpenFF Toolkit, RDKit, PDBFixer, gemmi, and
+# openmmforcefields.  Leave commented to use OPENMM_PARAMETERIZER_PYTHON or
+# .param-env/bin/python.
+# python = "/opt/param-env/bin/python"
+
+forcefields = ["amber14/protein.ff14SB.xml", "amber14/tip3p.xml"]
+ligand_forcefield = "openff-2.3.0"
+ph = 7.4
+padding_nm = 1.0
+ionic_strength_molar = 0.15
+add_missing_residues = false
+allow_undefined_stereo = false
+max_ligand_residues = 50
+# ccd_cache = "~/.cache/openmm-parameterizer/ccd"
+reuse_existing = true
+
+# ---------------------------------------------------------------------------
+# Energy minimization
+# ---------------------------------------------------------------------------
+
+[minimization]
+enabled = true
+max_iterations = 0          # 0 = minimize until convergence
+tolerance_kj_mol_nm = 10.0
+
+# ---------------------------------------------------------------------------
+# Equilibration stages
+# ---------------------------------------------------------------------------
+#
+# Add, remove, or reorder [[equilibration]] blocks to change the number of
+# stages.  Each stage starts from the previous stage's state.xml.
+#
+# Stage duration: set exactly one of steps, duration_ps, or duration_ns.
+# A fixed-step integrator converts duration to steps with its timestep.
+#
+# Common stage keys:
+#   report_interval      state-log interval (steps)
+#   trajectory_interval  DCD interval (steps; unset = report_interval,
+#                        0 disables the trajectory)
+#   checkpoint_interval  checkpoint interval (steps)
+#   retries              retry a failed stage from its latest checkpoint
+#   retry_delay_s        seconds between attempts
+#   initial_velocity_temperature_k  optional starting temperature for velocities
+#   velocity_seed        optional seed for initial velocities
+
+[[equilibration]]
+name = "nvt"
+duration_ps = 20.0
+report_interval = 1000
+trajectory_interval = 1000
+checkpoint_interval = 1000
+retries = 0
+velocity_seed = 1
+
+[equilibration.integrator]
+type = "langevin_middle"
+temperature_k = 300.0
+friction_per_ps = 1.0
+timestep_ps = 0.002
+random_seed = 1
+
+[equilibration.barostat]
+type = "none"
+
+[[equilibration]]
+name = "npt"
+duration_ps = 100.0
+report_interval = 1000
+trajectory_interval = 1000
+checkpoint_interval = 1000
+retries = 0
+
+[equilibration.integrator]
+type = "langevin_middle"
+temperature_k = 300.0
+friction_per_ps = 1.0
+timestep_ps = 0.002
+random_seed = 1
+
+[equilibration.barostat]
+type = "monte_carlo"
+pressure_bar = 1.0
+temperature_k = 300.0
+frequency = 25
+random_seed = 1
+
+# ---------------------------------------------------------------------------
+# Production stage
+# ---------------------------------------------------------------------------
+#
+# Production follows the last equilibration stage and is checkpointed so an
+# interrupted run can resume.  The default is deliberately short; increase
+# duration_ns for a real production run.
+
+[production]
+name = "production"
+enabled = true
+duration_ns = 0.1
+report_interval = 1000
+trajectory_interval = 5000
+checkpoint_interval = 5000
+retries = 2
+retry_delay_s = 5.0
+
+[production.integrator]
+type = "langevin_middle"
+temperature_k = 300.0
+friction_per_ps = 1.0
+timestep_ps = 0.002
+random_seed = 1
+
+[production.barostat]
+type = "monte_carlo"
+pressure_bar = 1.0
+temperature_k = 300.0
+frequency = 25
+random_seed = 1

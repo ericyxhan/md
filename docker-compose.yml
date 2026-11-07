@@ -1,0 +1,42 @@
+services:
+  # Verify that the NVIDIA driver is visible and OpenMM can use CUDA.
+  openmm:
+    build: .
+    image: openmm-cuda12:8.6.1
+    gpus: all
+    environment:
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    volumes:
+      - .:/app
+    working_dir: /app
+    command: python check_gpu.py
+
+  # Run the full workflow with the settings in config.toml.
+  simulate:
+    build: .
+    image: openmm-cuda12:8.6.1
+    gpus: all
+    environment:
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    volumes:
+      - .:/app
+    working_dir: /app
+    command: python simulate.py --config config.toml
+
+  # Print the resolved configuration without writing files or using a GPU.
+  dry-run:
+    build: .
+    image: openmm-cuda12:8.6.1
+    volumes:
+      - .:/app
+    working_dir: /app
+    command: python simulate.py --config config.toml --dry-run
+
+  # Run the CPU-only unit tests inside the same image as the workflow.
+  test:
+    build: .
+    image: openmm-cuda12:8.6.1
+    volumes:
+      - .:/app
+    working_dir: /app
+    command: python -m unittest discover -s tests -t .
