@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -312,6 +313,64 @@ class StageRunnerTests(unittest.TestCase):
             with self.assertRaises(RuntimeError) as context:
                 stage_completed(stage_dir, changed)
             self.assertIn("--restart-stage", str(context.exception))
+
+    def test_chunked_stepping_reports_monotonic_progress(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            stage_dir = Path(temporary) / "chunked"
+            stage = make_stage(steps=250)
+            events: list[tuple[int, int, int]] = []
+
+            result = run_stage(
+                system=self.system,
+                topology=self.topology,
+                positions=self.positions,
+                box_vectors=self.box_vectors,
+                stage=stage,
+                stage_dir=stage_dir,
+                platform=self.platform,
+                platform_properties=CPU_PROPERTIES,
+                on_progress=lambda step, total, attempt: events.append(
+                    (step, total, attempt)
+                ),
+            )
+
+            self.assertEqual(result.steps_completed, 250)
+            self.assertEqual([event[0] for event in events], sorted(
+                event[0] for event in events
+            ))
+            self.assertGreaterEqual(len(events), 3)
+            self.assertTrue(all(event[1] == 250 for event in events))
+            self.assertEqual(events[-1][0], 250)
+            self.assertTrue(stage_completed(stage_dir, stage))
+
+    def test_interrupt_saves_checkpoint_and_marks_stage_canceled(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            stage_dir = Path(temporary) / "interrupted"
+            stage = make_stage(steps=250)
+
+            def interrupt(step: int, _total: int, _attempt: int) -> None:
+                if step > 0:
+                    raise KeyboardInterrupt
+
+            with self.assertRaises(KeyboardInterrupt):
+                run_stage(
+                    system=self.system,
+                    topology=self.topology,
+                    positions=self.positions,
+                    box_vectors=self.box_vectors,
+                    stage=stage,
+                    stage_dir=stage_dir,
+                    platform=self.platform,
+                    platform_properties=CPU_PROPERTIES,
+                    on_progress=interrupt,
+                )
+
+            self.assertTrue((stage_dir / "checkpoint.chk").is_file())
+            manifest = json.loads(
+                (stage_dir / "stage.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(manifest["status"], "canceled")
+            self.assertFalse(stage_completed(stage_dir, stage))
 
 
 if __name__ == "__main__":

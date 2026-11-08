@@ -29,7 +29,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from sys import stdout
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from openmm import (
     BrownianIntegrator,
@@ -66,6 +66,14 @@ from config import (
     MinimizationConfig,
     StageConfig,
 )
+
+# Long stages are advanced in bounded chunks so the progress file stays fresh
+# and signal handlers run regularly.  The bounds keep a tiny report interval
+# from turning progress into a write loop while still bounding latency.
+PROGRESS_CHUNK_MIN = 100
+PROGRESS_CHUNK_MAX = 1000
+
+ProgressCallback = Callable[[int, int, int], None]
 
 
 def log(message: str) -> None:
@@ -387,6 +395,34 @@ def _add_reporters(
 # ---------------------------------------------------------------------------
 
 
+def _advance_simulation(
+    simulation: Simulation,
+    target_steps: int,
+    *,
+    report_interval: int,
+    attempt: int,
+    on_progress: ProgressCallback | None,
+) -> None:
+    """Step to *target_steps* in chunks, reporting between chunks.
+
+    Reporters and checkpoint intervals still fire at their configured steps,
+    because OpenMM treats each ``step`` call as a continuation of the same run.
+    """
+
+    if on_progress is not None:
+        on_progress(simulation.currentStep, target_steps, attempt)
+
+    interval = min(
+        PROGRESS_CHUNK_MAX,
+        max(PROGRESS_CHUNK_MIN, report_interval or PROGRESS_CHUNK_MIN),
+    )
+    while simulation.currentStep < target_steps:
+        end = min(target_steps, simulation.currentStep + interval)
+        simulation.step(end - simulation.currentStep)
+        if on_progress is not None:
+            on_progress(simulation.currentStep, target_steps, attempt)
+
+
 @dataclass(frozen=True)
 class StageResult:
     """What a completed stage produced."""
@@ -398,6 +434,7 @@ class StageResult:
     steps_completed: int
     resumed: bool
     duration_s: float
+    attempts: int = 1
 
 
 def run_stage(
@@ -413,6 +450,7 @@ def run_stage(
     initial_state_path: Path | None = None,
     resume: bool = True,
     reset_velocities: bool = False,
+    on_progress: ProgressCallback | None = None,
 ) -> StageResult:
     """Run one stage, resuming and retrying from its checkpoint as needed.
 
@@ -461,6 +499,7 @@ def run_stage(
                 previous_manifest=existing_manifest,
                 attempt=attempt + 1,
                 reset_velocities=reset_velocities,
+                on_progress=on_progress,
             )
         except Exception as exc:  # noqa: BLE001 - retries are the point
             last_error = exc
@@ -497,6 +536,7 @@ def _run_stage_attempt(
     previous_manifest: dict[str, Any] | None,
     attempt: int,
     reset_velocities: bool,
+    on_progress: ProgressCallback | None = None,
 ) -> StageResult:
     simulation = _create_simulation(
         system, topology, stage, platform, platform_properties
@@ -577,7 +617,13 @@ def _run_stage_attempt(
                 checkpoint_path=checkpoint_path,
                 resumed=resumed,
             )
-            simulation.step(stage.steps - start_step)
+            _advance_simulation(
+                simulation,
+                stage.steps,
+                report_interval=stage.report_interval,
+                attempt=attempt,
+                on_progress=on_progress,
+            )
             if not _state_is_finite(simulation):
                 raise RuntimeError(
                     f"Stage {stage.name!r} produced a non-finite energy; "
@@ -586,6 +632,31 @@ def _run_stage_attempt(
 
         simulation.saveCheckpoint(str(checkpoint_path))
         simulation.saveState(str(state_path))
+    except KeyboardInterrupt:
+        # Preserve the most recent state so a canceled job can resume.  The
+        # interrupt still propagates to main; it is never swallowed here.
+        try:
+            simulation.saveCheckpoint(str(checkpoint_path))
+        except Exception:  # noqa: BLE001 - best effort during shutdown
+            pass
+        _write_manifest(
+            manifest_path,
+            {
+                "name": stage.name,
+                "status": "canceled",
+                "config_fingerprint": fingerprint,
+                "started_at": started_at,
+                "updated_at": _utc_now(),
+                "attempt": attempt,
+                "start_step": start_step,
+                "target_steps": stage.steps,
+                "resumed": resumed,
+                "error": "interrupted",
+                "integrator": asdict(stage.integrator),
+                "barostat": asdict(stage.barostat),
+            },
+        )
+        raise
     except Exception as exc:
         _write_manifest(
             manifest_path,
@@ -652,6 +723,7 @@ def _run_stage_attempt(
         steps_completed=steps_completed,
         resumed=resumed,
         duration_s=duration_s,
+        attempts=attempt,
     )
 
 

@@ -1,0 +1,125 @@
+name: md-service
+
+services:
+  migrate:
+    build:
+      context: ..
+      dockerfile: service/api/Dockerfile
+    image: md-api:local
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      DATABASE_URL: sqlite:////db/app.db
+      DATA_ROOT: /data
+    volumes:
+      - ${HOST_DB_DIR:-/srv/md-service/db}:/db
+      - ${HOST_DATA_DIR:-/srv/md-service/data}:/data
+    restart: "no"
+
+  api:
+    image: md-api:local
+    build:
+      context: ..
+      dockerfile: service/api/Dockerfile
+    command:
+      - uvicorn
+      - app.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --workers
+      - "1"
+      - --no-access-log
+    environment:
+      DATABASE_URL: sqlite:////db/app.db
+      DATA_ROOT: /data
+      SERVICE_API_TOKEN: ${SERVICE_API_TOKEN:?set SERVICE_API_TOKEN}
+      WORKER_TOKEN: ${WORKER_TOKEN:?set WORKER_TOKEN}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      SIMULATION_PLATFORM: ${SIMULATION_PLATFORM:-CUDA}
+      ALLOW_PDB_DOWNLOAD: ${ALLOW_PDB_DOWNLOAD:-true}
+      DOCS_ENABLED: ${DOCS_ENABLED:-true}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      RATE_LIMIT_REQUESTS_PER_MINUTE: ${RATE_LIMIT_REQUESTS_PER_MINUTE:-120}
+      WORKER_LEASE_SECONDS: ${WORKER_LEASE_SECONDS:-60}
+      WORKER_HEARTBEAT_INTERVAL_SECONDS: ${WORKER_HEARTBEAT_INTERVAL_SECONDS:-10}
+      REAPER_INTERVAL_SECONDS: ${REAPER_INTERVAL_SECONDS:-10}
+      MAX_QUEUED_JOBS_PER_OWNER: ${MAX_QUEUED_JOBS_PER_OWNER:-5}
+      MIN_FREE_DISK_BYTES: ${MIN_FREE_DISK_BYTES:-536870912}
+      RETENTION_DAYS: ${RETENTION_DAYS:-0}
+      ORPHAN_WORKSPACE_HOURS: ${ORPHAN_WORKSPACE_HOURS:-24}
+      EVENT_STREAM_POLL_SECONDS: ${EVENT_STREAM_POLL_SECONDS:-1}
+      EVENT_STREAM_HEARTBEAT_SECONDS: ${EVENT_STREAM_HEARTBEAT_SECONDS:-15}
+      LOG_TAIL_MAX_BYTES: ${LOG_TAIL_MAX_BYTES:-262144}
+      LOG_TAIL_DEFAULT_LINES: ${LOG_TAIL_DEFAULT_LINES:-200}
+    volumes:
+      - ${HOST_DB_DIR:-/srv/md-service/db}:/db
+      - ${HOST_DATA_DIR:-/srv/md-service/data}:/data
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    expose:
+      - "8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  worker:
+    image: md-worker:local
+    build:
+      context: ./worker
+      dockerfile: Dockerfile
+    environment:
+      API_URL: http://api:8000
+      WORKER_TOKEN: ${WORKER_TOKEN:?set WORKER_TOKEN}
+      WORKER_ID: ${WORKER_ID:-gpu-0}
+      WORKER_HOSTNAME: ${WORKER_HOSTNAME:-}
+      WORKER_GPU_NAME: ${WORKER_GPU_NAME:-}
+      WORKER_GPU_UUID: ${WORKER_GPU_UUID:-}
+      DATA_ROOT: /data
+      CUDA_VISIBLE_DEVICES: ${CUDA_VISIBLE_DEVICES:-0}
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      SIMULATE_PATH: /app/simulate.py
+      SIMULATE_CWD: /app
+      WORKER_POLL_SECONDS: ${WORKER_POLL_SECONDS:-2}
+      WORKER_HEARTBEAT_SECONDS: ${WORKER_HEARTBEAT_SECONDS:-10}
+      WORKER_PROGRESS_POLL_SECONDS: ${WORKER_PROGRESS_POLL_SECONDS:-2}
+      WORKER_PROGRESS_SEND_SECONDS: ${WORKER_PROGRESS_SEND_SECONDS:-30}
+      WORKER_CANCEL_GRACE_SECONDS: ${WORKER_CANCEL_GRACE_SECONDS:-30}
+      WORKER_CANCEL_TERM_SECONDS: ${WORKER_CANCEL_TERM_SECONDS:-10}
+      WORKER_REQUEST_TIMEOUT_SECONDS: ${WORKER_REQUEST_TIMEOUT_SECONDS:-30}
+      WORKER_MAX_ARTIFACTS: ${WORKER_MAX_ARTIFACTS:-2000}
+    volumes:
+      - ${HOST_DATA_DIR:-/srv/md-service/data}:/data
+    depends_on:
+      api:
+        condition: service_healthy
+    gpus: all
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      MD_SERVICE_DOMAIN: ${MD_SERVICE_DOMAIN:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:

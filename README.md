@@ -18,6 +18,10 @@ Disconnected nonstandard components are extracted from the protein, kept as
 whole molecules, and parameterized with SMIRNOFF. Protein, water, and ions use
 `amber14/protein.ff14SB.xml` + `amber14/tip3p.xml`.
 
+For the FastAPI control plane, SQLite schema, and GPU worker handoff, see
+[`service/README.md`](service/README.md) and
+[`docs/service-implementation-plan.md`](docs/service-implementation-plan.md).
+
 ## Pipeline
 
 ```text
@@ -387,6 +391,17 @@ rerunning extends the existing production stage from its checkpoint.
 Changing a stage's integrator or barostat does invalidate its checkpoint. The
 workflow stops with a message asking for `--restart-stage NAME`, because
 resuming an incompatible checkpoint would be unsafe.
+
+### Live progress
+
+The service worker runs `simulate.py --progress-file <job_root>/progress.json`.
+The file is an atomic JSON document with the current phase, stage, step,
+percent, attempt, and timestamp. It is written at lifecycle boundaries and
+between bounded simulation chunks so a reader can follow a long stage without
+waiting for it to finish. SIGTERM takes the same graceful path as Ctrl-C: the
+current stage checkpoint is saved and the process exits 130.
+
+The flag is optional for manual runs and is not written during `--dry-run`.
 
 ## Output bundle
 

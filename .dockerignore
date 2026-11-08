@@ -3,7 +3,10 @@
 .mamba/
 .tools/
 __pycache__/
+**/__pycache__/
 *.py[cod]
+.pytest_cache/
+**/.pytest_cache/
 my_downloads/
 outputs/
 input.pdb

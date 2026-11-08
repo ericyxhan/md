@@ -1,0 +1,22 @@
+# Caddy front for the MD service.
+#
+# Only the public API and liveness endpoint are proxied.  Internal worker
+# routes are answered with 404 so a leaked worker token is not enough to reach
+# them from the internet.
+{$MD_SERVICE_DOMAIN:localhost} {
+	handle /internal/* {
+		respond 404
+	}
+
+	handle /api/* {
+		reverse_proxy api:8000
+	}
+
+	handle /healthz {
+		reverse_proxy api:8000
+	}
+
+	handle {
+		respond 404
+	}
+}

@@ -1,9 +1,11 @@
 .venv/
 .param-env/
+.env
 .mamba/
 .tools/
 __pycache__/
 *.py[cod]
+.pytest_cache/
 my_downloads/
 outputs/
 input.pdb

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import shlex
+import signal
 import sys
 from pathlib import Path
 
@@ -33,6 +34,7 @@ from parameterization import (
     parameterizer_python,
     resolve_inputs,
 )
+from run_progress import ProgressWriter
 from stages import log, run_minimization, run_stage, stage_completed
 
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -70,6 +72,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--platform",
         default=None,
         help="Override the OpenMM platform, for example CUDA or CPU.",
+    )
+    parser.add_argument(
+        "--progress-file",
+        type=Path,
+        default=None,
+        help=(
+            "Write a live JSON progress document to this path. The service "
+            "worker sets this; normal command-line runs can omit it."
+        ),
     )
     restart_group = parser.add_mutually_exclusive_group()
     restart_group.add_argument(
@@ -198,6 +209,7 @@ def _ensure_minimization(
     platform: Platform,
     platform_properties: dict[str, str],
     restart_stages: set[str],
+    progress: ProgressWriter,
 ) -> Path | None:
     if not config.minimization.enabled:
         log("Minimization disabled")
@@ -208,13 +220,31 @@ def _ensure_minimization(
 
     if "minimization" not in restart_stages and state_path.is_file():
         log("Reusing existing minimization state")
+        progress.update(
+            phase="minimizing",
+            status="running",
+            stage="minimization",
+            step=0,
+            total_steps=0,
+            percent=100.0,
+            error=None,
+        )
         return state_path
 
     if "minimization" in restart_stages:
         bundle.clear_stage("minimization")
         stage_dir = bundle.stage("minimization")
 
-    return run_minimization(
+    progress.update(
+        phase="minimizing",
+        status="running",
+        stage="minimization",
+        step=0,
+        total_steps=0,
+        percent=0.0,
+        error=None,
+    )
+    state_path = run_minimization(
         system=system,
         topology=prepared.topology,
         positions=prepared.positions,
@@ -224,6 +254,30 @@ def _ensure_minimization(
         platform_properties=platform_properties,
         config=config.minimization,
     )
+    progress.update(percent=100.0)
+    return state_path
+
+
+def _stage_reporter(
+    progress: ProgressWriter, name: str, kind: str
+):
+    def report(step: int, total_steps: int, attempt: int) -> None:
+        percent = (
+            100.0 * step / total_steps if total_steps else 0.0
+        )
+        progress.update(
+            phase="simulating",
+            status="running",
+            stage=name,
+            kind=kind,
+            step=step,
+            total_steps=total_steps,
+            percent=percent,
+            attempt=attempt,
+            error=None,
+        )
+
+    return report
 
 
 def _run_stages(
@@ -235,6 +289,7 @@ def _run_stages(
     platform_properties: dict[str, str],
     restart_stages: set[str],
     initial_state: Path | None,
+    progress: ProgressWriter,
 ) -> Path | None:
     previous_state = initial_state
     reset_velocities = True
@@ -244,11 +299,16 @@ def _run_stages(
 
         if stage.name not in restart_stages and stage_completed(stage_dir, stage):
             log(f"{kind.title()} stage {stage.name!r} is already complete; skipping")
+            _stage_reporter(progress, stage.name, kind)(
+                stage.steps, stage.steps, 1
+            )
             previous_state = stage_dir / "state.xml"
             reset_velocities = False
             continue
 
         log(f"Running {kind} stage {stage.name!r}")
+        report = _stage_reporter(progress, stage.name, kind)
+        report(0, stage.steps, 1)
         result = run_stage(
             system=system,
             topology=prepared.topology,
@@ -261,7 +321,9 @@ def _run_stages(
             initial_state_path=previous_state,
             resume=stage.name not in restart_stages,
             reset_velocities=reset_velocities,
+            on_progress=report,
         )
+        report(result.steps_completed, stage.steps, result.attempts)
         previous_state = result.state_path
         reset_velocities = False
 
@@ -269,6 +331,42 @@ def _run_stages(
 
 
 def run_workflow(config: WorkflowConfig, args: argparse.Namespace) -> None:
+    progress = ProgressWriter(args.progress_file)
+    try:
+        _run_workflow(config, args, progress)
+    except KeyboardInterrupt:
+        progress.update(
+            phase="canceled",
+            status="canceled",
+            error="Interrupted; checkpoints are preserved.",
+        )
+        raise
+    except Exception as exc:
+        progress.update(phase="failed", status="failed", error=str(exc))
+        raise
+    else:
+        progress.update(
+            phase="completed",
+            status="completed",
+            percent=100.0,
+            error=None,
+        )
+
+
+def _run_workflow(
+    config: WorkflowConfig,
+    args: argparse.Namespace,
+    progress: ProgressWriter,
+) -> None:
+    progress.write(
+        phase="starting",
+        status="running",
+        stage=None,
+        step=0,
+        total_steps=0,
+        percent=0.0,
+        error=None,
+    )
     platform = _get_platform(config)
     platform_properties = dict(config.run.platform_properties)
     restart_stages = _restart_plan(config, args)
@@ -284,6 +382,15 @@ def run_workflow(config: WorkflowConfig, args: argparse.Namespace) -> None:
     if restart_stages:
         log("Restarting stages: " + ", ".join(sorted(restart_stages)))
 
+    progress.write(
+        phase="parameterizing",
+        status="running",
+        stage=None,
+        step=0,
+        total_steps=0,
+        percent=0.0,
+        error=None,
+    )
     input_files = resolve_inputs(config, bundle)
     log(f"Input: {input_files.describe()}")
 
@@ -307,6 +414,16 @@ def run_workflow(config: WorkflowConfig, args: argparse.Namespace) -> None:
         platform,
         platform_properties,
         restart_stages,
+        progress,
+    )
+    progress.write(
+        phase="simulating",
+        status="running",
+        stage=None,
+        step=0,
+        total_steps=0,
+        percent=0.0,
+        error=None,
     )
     previous_state = _run_stages(
         config,
@@ -317,6 +434,7 @@ def run_workflow(config: WorkflowConfig, args: argparse.Namespace) -> None:
         platform_properties,
         restart_stages,
         previous_state,
+        progress,
     )
 
     print()
@@ -446,8 +564,28 @@ def _print_plan(config: WorkflowConfig, args: argparse.Namespace) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _install_signal_handlers() -> None:
+    """Turn SIGTERM into the same graceful path as Ctrl-C.
+
+    The service worker escalates SIGINT to SIGTERM.  Raising KeyboardInterrupt
+    lets ``main`` preserve checkpoints and exit 130 instead of being killed
+    without flushing the current stage.
+    """
+
+    def _terminate(_signum, _frame) -> None:
+        raise KeyboardInterrupt
+
+    try:
+        signal.signal(signal.SIGTERM, _terminate)
+    except (ValueError, OSError):
+        # Not running in the main thread; the caller owns signal handling.
+        pass
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    args.progress_file = _absolute_cli_path(args.progress_file)
+    _install_signal_handlers()
     try:
         config = load_config(
             args.config or _default_config_path(),
