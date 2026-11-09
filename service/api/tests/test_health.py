@@ -15,7 +15,7 @@ def test_readyz_checks_database_and_storage(client) -> None:
     body = response.json()
     assert body["status"] == "ok"
     assert body["checks"]["database"] == "ok"
-    assert body["checks"]["migrations"] == "0002"
+    assert body["checks"]["migrations"] == "0004"
     assert body["checks"]["data_root"] == "ok"
 
 

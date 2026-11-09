@@ -35,10 +35,36 @@ class Settings(BaseSettings):
     service_api_token: str = ""
     worker_token: str = ""
 
+    # -- Browser sessions -------------------------------------------------
+    # The web frontend never receives SERVICE_API_TOKEN.  It signs in with a
+    # shared lab password and receives a signed HttpOnly cookie instead.
+    web_password: str = ""
+    web_password_hash: str = ""
+    web_session_secret: str = ""
+    web_session_ttl_seconds: int = Field(
+        default=12 * 60 * 60, ge=300, le=30 * 24 * 60 * 60
+    )
+    web_cookie_secure: bool = True
+    web_login_attempts_per_minute: int = Field(default=10, ge=1, le=1000)
+
     # -- Workflow ---------------------------------------------------------
     simulation_platform: str = "CUDA"
     allow_pdb_download: bool = True
     pdb_download_timeout_seconds: float = Field(default=30.0, gt=0, le=120)
+
+    # -- System preparation -----------------------------------------------
+    # Path to the Packmol-Memgen executable used by membrane embedding.  If
+    # unset, prep endpoints return 503.
+    packmol_path: str = ""
+
+    # Prep worker poll and lease settings (mirrors the simulation worker).
+    prep_poll_seconds: float = Field(default=2.0, gt=0, le=60)
+    prep_heartbeat_seconds: float = Field(default=10.0, gt=0, le=60)
+    prep_progress_poll_seconds: float = Field(default=2.0, gt=0, le=30)
+    prep_progress_send_seconds: float = Field(default=30.0, gt=0, le=300)
+    prep_cancel_grace_seconds: float = Field(default=30.0, ge=0)
+    prep_cancel_term_seconds: float = Field(default=10.0, ge=0)
+    prep_request_timeout_seconds: float = Field(default=30.0, gt=0)
 
     # -- Upload and job limits -------------------------------------------
     max_upload_bytes: int = Field(default=50 * MIB, ge=1)

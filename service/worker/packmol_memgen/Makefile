@@ -1,0 +1,51 @@
+#  Simple top-level Makefile to point users to packmol and memembed:
+-include ../../config.h
+
+PACKMOL_PATH = lib/packmol
+MEMEMBED_PATH = lib/memembed
+PPM3_PATH = lib/ppm3
+MEMGEN_PATH = $(PWD)
+ifndef AMBER_SOURCE
+FORTRAN=/usr/bin/gfortran
+else
+FORTRAN=$(FC)
+endif
+
+all: install.packmol install.memembed install.ppm3
+
+install.packmol:
+	cd $(PACKMOL_PATH) && bash configure $(FORTRAN) && make all
+
+install.memembed:
+	cd $(MEMEMBED_PATH) && make all
+
+install.ppm3:
+	cd $(PPM3_PATH) && make all
+
+test.memembed:
+	cd $(MEMEMBED_PATH) && make test
+
+clean: clean.packmol clean.memembed clean.ppm3
+
+clean.packmol:
+	cd $(PACKMOL_PATH) && make cleanall
+
+clean.memembed:
+	cd $(MEMEMBED_PATH) && make clean
+
+clean.ppm3:
+	cd $(PPM3_PATH) && make clean
+
+help:
+	@echo ""
+	@echo "PACKMOL_MEMGEN"
+	@echo "Compilation of PACKMOL and MEMEMBED as dependencies for PACKMOL_MEMGEN. For recompiling execute: "
+	@echo "make clean"
+	@echo "make all"
+	@echo ""
+	@echo "Other available options:"
+	@echo "install.packmol"
+	@echo "install.memembed"
+	@echo "clean.packmol"
+	@echo "clean.memembed"
+

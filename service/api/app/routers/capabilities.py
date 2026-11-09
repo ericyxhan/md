@@ -20,6 +20,7 @@ from ..schemas import (
     StageSpec,
 )
 from ..security import require_owner
+from ..settings import get_settings
 from ..storage import ALLOWED_SUFFIXES, LIGAND_SUFFIXES, PROTEIN_SUFFIXES
 
 router = APIRouter(tags=["capabilities"])
@@ -76,4 +77,12 @@ def capabilities(
         },
         "pdb_download_enabled": settings.allow_pdb_download,
         "simulation_platform": settings.simulation_platform,
+        "prep_workflows": {
+            "membrane_embed": {
+                "enabled": bool(settings.packmol_path),
+                "lipids": ["POPC", "POPE", "DPPC", "DLPC", "DSPC", "SOPC"],
+                "max_box_padding_nm": 5.0,
+                "supported_input_formats": [".pdb", ".cif", ".mmcif"],
+            }
+        },
     }

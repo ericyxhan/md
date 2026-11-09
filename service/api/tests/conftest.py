@@ -19,6 +19,8 @@ from app.settings import Settings  # noqa: E402
 
 TEST_TOKEN = "test-service-token"
 WORKER_TOKEN = "test-worker-token"
+TEST_WEB_PASSWORD = "test-web-password"
+TEST_SESSION_SECRET = "test-session-secret"
 
 
 def upgrade_database(database_url: str) -> None:
@@ -37,6 +39,9 @@ def settings(tmp_path: Path) -> Settings:
         data_root=data_root,
         service_api_token=TEST_TOKEN,
         worker_token=WORKER_TOKEN,
+        web_password=TEST_WEB_PASSWORD,
+        web_session_secret=TEST_SESSION_SECRET,
+        web_cookie_secure=False,
         allow_pdb_download=False,
         simulation_platform="CPU",
     )

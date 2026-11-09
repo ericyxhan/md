@@ -205,3 +205,42 @@ class AuditEvent(Base):
     details_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     remote_addr: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     created_at: Mapped[str] = mapped_column(String(32), nullable=False)
+
+
+class PrepJob(Base):
+    """System-preparation jobs: membrane embedding, box building, etc.
+
+    Prep jobs are long-running background tasks that transform uploaded
+    structures into simulation-ready systems.  Their outputs are registered as
+    normal file records so they can be referenced as ``complex_file_id`` in an
+    MD job creation request.
+    """
+
+    __tablename__ = "prep_jobs"
+    __table_args__ = (
+        Index("ix_prep_jobs_owner_created_at", "owner_id", "created_at"),
+        Index("ix_prep_jobs_status", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    type: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(24), nullable=False, default="queued"
+    )
+    run_token: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    cancel_requested: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    request_json: Mapped[str] = mapped_column(Text, nullable=False)
+    result_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    output_file_ids: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    phase: Mapped[Optional[str]] = mapped_column(String(24), nullable=True)
+    progress_percent: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    progress_updated_at: Mapped[Optional[str]] = mapped_column(
+        String(32), nullable=True
+    )
+    created_at: Mapped[str] = mapped_column(String(32), nullable=False)
+    updated_at: Mapped[str] = mapped_column(String(32), nullable=False)
+    completed_at: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)

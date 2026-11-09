@@ -25,6 +25,7 @@ ArtifactKind = Literal[
     "structure",
     "metadata",
 ]
+PrepStatus = Literal["queued", "claimed", "running", "completed", "failed", "canceled"]
 
 _WORKER_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
 
@@ -139,3 +140,63 @@ class FinishRequest(InternalModel):
 
 class FinishResponse(InternalModel):
     status: str
+
+
+# ---------------------------------------------------------------------------
+# Internal prep protocol
+# ---------------------------------------------------------------------------
+
+
+class PrepClaimRequest(InternalModel):
+    worker_id: str = Field(
+        min_length=1, max_length=64, pattern=_WORKER_ID_PATTERN
+    )
+
+
+class PrepClaimResponse(InternalModel):
+    prep_job_id: str
+    run_token: str
+    # Membrane-embed fields
+    protein_file_id: str | None = None
+    lipid: str | None = None
+    box_padding_nm: float | None = None
+    orientation: str | None = None
+    ionic_strength_molar: float | None = None
+    # System-prep fields
+    job_type: str | None = None
+    steps: list[dict[str, Any]] | None = None
+    # Common
+    source_path: str | None = None
+    work_dir: str | None = None
+
+
+class PrepProgressRequest(InternalModel):
+    run_token: str = Field(min_length=1, max_length=36)
+    phase: str | None = Field(default=None, max_length=64)
+    percent: float | None = Field(default=None, ge=0.0, le=100.0)
+    message: str | None = Field(default=None, max_length=1000)
+
+
+class PrepProgressResponse(InternalModel):
+    cancel_requested: bool
+    lease_expires_at: str | None = None
+
+
+class PrepFinishRequest(InternalModel):
+    run_token: str = Field(min_length=1, max_length=36)
+    status: Literal["completed", "failed", "canceled"]
+    output_file_ids: list[str] = Field(default_factory=list, max_length=100)
+    error_code: str | None = Field(default=None, max_length=64)
+    error_message: str | None = Field(default=None, max_length=8000)
+
+
+class PrepFinishResponse(InternalModel):
+    status: str
+
+
+class PrepCancelRequest(InternalModel):
+    run_token: str = Field(min_length=1, max_length=36)
+
+
+class PrepCancelResponse(InternalModel):
+    ok: bool = True

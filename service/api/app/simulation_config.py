@@ -22,8 +22,12 @@ def _candidate_paths() -> list[Path]:
     if configured:
         candidates.append(Path(configured))
     candidates.append(Path.cwd() / "config.py")
-    # service/api/app/simulation_config.py -> repository root
-    candidates.append(Path(__file__).resolve().parents[3] / "config.py")
+    # service/api/app/simulation_config.py -> repository root.  Container
+    # installs are shallower (/app/app/simulation_config.py), so guard the
+    # index instead of assuming a fixed depth.
+    module_path = Path(__file__).resolve()
+    if len(module_path.parents) > 3:
+        candidates.append(module_path.parents[3] / "config.py")
     candidates.append(Path("/app/config.py"))
     return candidates
 

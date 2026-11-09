@@ -258,6 +258,18 @@ class JobValidateRequest(JobCreate):
     """The dry-validation request is the same as the create request."""
 
 
+class SessionLogin(StrictModel):
+    password: str = Field(min_length=1, max_length=512)
+
+
+class SessionOut(BaseModel):
+    authenticated: bool
+    owner: str | None = None
+    issued_at: str | None = None
+    expires_at: str | None = None
+    auth_method: str | None = None
+
+
 class RetryRequest(StrictModel):
     mode: Literal["resume", "restart", "restart_stage", "reparameterize"]
     stage: str | None = Field(default=None, min_length=1, max_length=64)
@@ -388,3 +400,135 @@ class JobPlanOut(BaseModel):
 INTEGRATOR_CHOICES = INTEGRATOR_TYPES
 BAROSTAT_CHOICES = BAROSTAT_TYPES
 INPUT_MODE_CHOICES = INPUT_MODES
+
+
+# ---------------------------------------------------------------------------
+# System preparation: membrane embedding
+# ---------------------------------------------------------------------------
+
+
+LipidType = Literal["POPC", "POPE", "DPPC", "DLPC", "DSPC", "SOPC"]
+
+
+class MembraneEmbedRequest(StrictModel):
+    """Request to embed a protein structure into a lipid bilayer."""
+
+    protein_file_id: str = Field(
+        min_length=1, max_length=64,
+        description="Uploaded protein complex (PDB or mmCIF) file ID",
+    )
+    lipid: LipidType = Field(default="POPC")
+    box_padding_nm: float = Field(
+        default=1.5, ge=0.5, le=5.0,
+        description="Padding around the protein in the membrane box (nm)",
+    )
+    orientation: str | None = Field(
+        default=None,
+        description="Optional membrane orientation: 'pm' or 'pp'",
+    )
+    ionic_strength_molar: float = Field(
+        default=0.15, ge=0.0, le=1.0,
+    )
+
+
+class MembraneEmbedOut(BaseModel):
+    prep_job_id: str
+    status: str
+    embedded_pdb_file_id: str | None = None
+    topology_file_id: str | None = None
+    error: str | None = None
+
+
+class PrepJobStatus(BaseModel):
+    id: str
+    type: str
+    status: str
+    created_at: str
+    completed_at: str | None = None
+    output_file_ids: list[str] = []
+    error: str | None = None
+    phase: str | None = None
+    progress_percent: float | None = None
+    progress_updated_at: str | None = None
+    cancel_requested: bool | None = None
+
+
+# ---------------------------------------------------------------------------
+# System preparation: structure operations (ligand removal, chain selection, etc.)
+# ---------------------------------------------------------------------------
+
+
+SystemPrepOperation = Literal["remove_ligand", "select_chain", "add_ligand"]
+
+
+class SystemPrepStep(StrictModel):
+    """One step in a system preparation pipeline."""
+
+    operation: SystemPrepOperation
+    ligand_to_remove: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=5,
+        description="Residue name of ligand to remove (for remove_ligand)",
+    )
+    chain_to_keep: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=2,
+        description="Chain ID to keep (for select_chain)",
+    )
+    ligand_file_ids: list[str] = Field(
+        default_factory=list,
+        max_length=20,
+        description="Ligand file IDs to add (for add_ligand)",
+    )
+
+    @model_validator(mode="after")
+    def _validate_step(self) -> "SystemPrepStep":
+        if self.operation == "remove_ligand" and not self.ligand_to_remove:
+            raise ValueError("remove_ligand requires ligand_to_remove")
+        if self.operation == "select_chain" and not self.chain_to_keep:
+            raise ValueError("select_chain requires chain_to_keep")
+        if self.operation == "add_ligand" and not self.ligand_file_ids:
+            raise ValueError("add_ligand requires at least one ligand_file_id")
+        return self
+
+
+class SystemPrepRequest(StrictModel):
+    """Request to prepare a system by applying one or more structure operations."""
+
+    name: str = Field(min_length=1, max_length=200)
+    input_file_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=64,
+        description="Uploaded PDB file ID (mutually exclusive with pdb_id)",
+    )
+    pdb_id: str | None = Field(
+        default=None,
+        min_length=4,
+        max_length=4,
+        description="RCSB PDB ID to download (mutually exclusive with input_file_id)",
+    )
+    steps: list[SystemPrepStep] = Field(
+        default_factory=list,
+        max_length=10,
+        description="Preparation steps to apply in order",
+    )
+
+    @model_validator(mode="after")
+    def _validate_input(self) -> "SystemPrepRequest":
+        if not self.input_file_id and not self.pdb_id:
+            raise ValueError("Either input_file_id or pdb_id is required")
+        if self.input_file_id and self.pdb_id:
+            raise ValueError("input_file_id and pdb_id are mutually exclusive")
+        if not self.steps:
+            raise ValueError("At least one step is required")
+        return self
+
+
+class SystemPrepOut(BaseModel):
+    prep_job_id: str
+    status: str
+    output_file_ids: list[str] = []
+    error: str | None = None

@@ -13,7 +13,7 @@ from .errors import install_error_handlers
 from .middleware import RequestContextMiddleware
 from .observability import configure_logging
 from .ratelimit import TokenBucketRateLimiter
-from .routers import capabilities, files, health, internal, jobs
+from .routers import capabilities, files, health, internal, internal_prep, jobs, prep, session
 from .security import rate_limit
 from .services.reaper import LeaseReaper
 from .settings import Settings, get_settings
@@ -57,6 +57,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.rate_limiter = TokenBucketRateLimiter(
         settings.rate_limit_requests_per_minute
     )
+    app.state.login_limiter = TokenBucketRateLimiter(
+        settings.web_login_attempts_per_minute
+    )
 
     if settings.cors_origin_list:
         app.add_middleware(
@@ -64,7 +67,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             allow_origins=settings.cors_origin_list,
             allow_credentials=True,
             allow_methods=["GET", "POST", "OPTIONS"],
-            allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
+            allow_headers=[
+                "Authorization",
+                "Content-Type",
+                "X-Request-ID",
+                "X-CSRF-Token",
+            ],
             expose_headers=["X-Request-ID"],
         )
 
@@ -74,7 +82,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     install_error_handlers(app)
     app.include_router(health.router)
+    app.include_router(session.router)
     app.include_router(internal.router)
+    app.include_router(internal_prep.router)
 
     api = APIRouter(
         prefix="/api/v1",
@@ -83,6 +93,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     api.include_router(capabilities.router)
     api.include_router(files.router)
     api.include_router(jobs.router)
+    api.include_router(prep.router)
     app.include_router(api)
     return app
 

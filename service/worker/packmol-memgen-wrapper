@@ -1,0 +1,28 @@
+#!/usr/bin/env python3
+"""Wrapper script for packmol-memgen.
+
+pip installs the packmol_memgen Python package but does not create a
+``packmol-memgen`` console script.  This wrapper invokes the module directly
+so the prep worker can call it as an executable.
+"""
+
+import sys
+import os
+
+from packmol_memgen.main import build_parser, PACKMOLMemgen
+
+
+def main():
+    parser = build_parser()
+    args = parser.parse_args()
+
+    pmg = PACKMOLMemgen(args)
+    pack = pmg.prepare()
+    if pack:
+        pmg.run_packmol()
+    pmg.postprocess()
+    pmg.cleanup()
+
+
+if __name__ == "__main__":
+    main()

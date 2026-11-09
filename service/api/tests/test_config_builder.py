@@ -260,3 +260,22 @@ def test_stage_and_total_step_limits(settings: Settings) -> None:
     assert "total" in str(total_error.value).lower() or "job_too_long" in str(
         total_error.value
     )
+
+
+def test_config_path_candidates_handle_shallow_container_layout(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """The API image installs at /app/app, which has fewer parents than the repo."""
+
+    from app import simulation_config
+
+    monkeypatch.setattr(
+        simulation_config, "__file__", "/app/app/simulation_config.py"
+    )
+    expected = tmp_path / "config.py"
+    monkeypatch.setenv("SIMULATION_CONFIG_PATH", str(expected))
+
+    candidates = simulation_config._candidate_paths()
+
+    assert candidates[0] == expected
+    assert Path("/app/config.py") in candidates
