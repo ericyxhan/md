@@ -49,6 +49,15 @@ Implemented in this repository:
 - Queue and free-disk admission checks plus opt-in retention and orphan
   cleanup hooks.
 - A backup/restore runbook and a tested SQLite `.backup` restore path.
+- A same-origin React web console (`service/web/`) with a shared-lab login,
+  signed HttpOnly sessions, CSRF protection, guided job creation, live progress,
+  logs, events, and artifact downloads. The frontend design is in
+  [`../docs/frontend-design.md`](../docs/frontend-design.md).
+- System preparation: membrane embedding via Packmol-Memgen (`POST
+  /api/v1/prep/membrane`, `GET /api/v1/prep/jobs/{id}`). Upload a protein
+  structure (PDB or mmCIF), embed it in a lipid bilayer, then use the resulting
+  embedded PDB as the input for a new MD job. Requires `PACKMOL_PATH` and the
+  `packmol-memgen` Python package on the API server; disabled by default.
 
 ## Docker Compose
 
@@ -62,6 +71,11 @@ cd /path/to/the/repository
 docker build -t openmm-cuda12:8.6.1 .
 docker build -t md-worker:local service/worker
 ```
+
+The root and worker Dockerfiles clear the executable-stack flag on the
+conda-forge PyTorch library with `patchelf`. Newer kernels refuse to load it
+otherwise, which breaks the NAGL charge model used by `openff-2.3.0`
+parameterization.
 
 Prepare host directories owned by the API UID (10001). The worker runs as root
 in the reference Compose file because GPU device access is host-specific; test
@@ -80,16 +94,17 @@ Create `service/.env` from `.env.example`, then start the stack:
 cd service
 cp .env.example .env
 # Set SERVICE_API_TOKEN, WORKER_TOKEN, MD_SERVICE_DOMAIN, and host paths.
-# Generate each token separately, for example:
+# Set WEB_PASSWORD (or WEB_PASSWORD_HASH) and WEB_SESSION_SECRET for the
+# browser console. Generate each token separately, for example:
 #   python -c 'import secrets; print(secrets.token_urlsafe(48))'
 docker compose --env-file .env up -d --build
 docker compose ps
 ```
 
-Caddy publishes only `/api/*` (currently `/api/v1/*`) and `/healthz`;
-`/internal/*` always returns 404. The API container is not published on a host
-port. For local API development without Caddy, run Uvicorn directly as shown
-below.
+Caddy publishes only `/api/*` (currently `/api/v1/*`), `/healthz`, and the
+single-page app; `/internal/*` always returns 404. The API and web containers
+are not published on host ports. For local API development without Caddy, run
+Uvicorn and Vite directly as shown below.
 
 Data lives in the host bind mounts (`HOST_DB_DIR` and `HOST_DATA_DIR`), not in
 named volumes. `docker compose down` therefore keeps SQLite and job files;
@@ -108,6 +123,8 @@ export SERVICE_API_TOKEN="dev-service-token"
 export WORKER_TOKEN="dev-worker-token"
 export SIMULATION_PLATFORM="CPU"
 export ALLOW_PDB_DOWNLOAD="false"
+# Optional: enable system preparation (membrane embedding)
+export PACKMOL_PATH="/usr/bin/packmol"
 
 ../../.venv/bin/python -m pip install -r requirements.txt
 ../../.venv/bin/alembic upgrade head

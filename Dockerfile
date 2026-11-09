@@ -24,11 +24,16 @@ RUN apt-get update \
         libxext6 \
         libsm6 \
         libice6 \
+        patchelf \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 COPY --from=param-env /opt/param-env /opt/param-env
+
+# conda-forge PyTorch marks libtorch_cpu.so with an executable stack, which
+# newer kernels reject at dlopen time. NAGL charges (openff-2.3.0) need torch.
+RUN patchelf --clear-execstack /opt/param-env/lib/libtorch_cpu.so
 
 # Install the CUDA simulation environment first so this layer is cached when
 # only code changes.

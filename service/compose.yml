@@ -35,6 +35,12 @@ services:
       DATA_ROOT: /data
       SERVICE_API_TOKEN: ${SERVICE_API_TOKEN:?set SERVICE_API_TOKEN}
       WORKER_TOKEN: ${WORKER_TOKEN:?set WORKER_TOKEN}
+      WEB_PASSWORD: ${WEB_PASSWORD:-}
+      WEB_PASSWORD_HASH: ${WEB_PASSWORD_HASH:-}
+      WEB_SESSION_SECRET: ${WEB_SESSION_SECRET:-}
+      WEB_SESSION_TTL_SECONDS: ${WEB_SESSION_TTL_SECONDS:-43200}
+      WEB_COOKIE_SECURE: ${WEB_COOKIE_SECURE:-true}
+      WEB_LOGIN_ATTEMPTS_PER_MINUTE: ${WEB_LOGIN_ATTEMPTS_PER_MINUTE:-10}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
       SIMULATION_PLATFORM: ${SIMULATION_PLATFORM:-CUDA}
       ALLOW_PDB_DOWNLOAD: ${ALLOW_PDB_DOWNLOAD:-true}
@@ -52,6 +58,16 @@ services:
       EVENT_STREAM_HEARTBEAT_SECONDS: ${EVENT_STREAM_HEARTBEAT_SECONDS:-15}
       LOG_TAIL_MAX_BYTES: ${LOG_TAIL_MAX_BYTES:-262144}
       LOG_TAIL_DEFAULT_LINES: ${LOG_TAIL_DEFAULT_LINES:-200}
+      # System preparation: path to the packmol-memgen wrapper script.
+      PACKMOL_PATH: ${PACKMOL_PATH:-/opt/worker/packmol-memgen-wrapper}
+      # Prep worker settings (used by the prep-worker service, not the API).
+      PREP_POLL_SECONDS: ${PREP_POLL_SECONDS:-2}
+      PREP_HEARTBEAT_SECONDS: ${PREP_HEARTBEAT_SECONDS:-10}
+      PREP_PROGRESS_POLL_SECONDS: ${PREP_PROGRESS_POLL_SECONDS:-2}
+      PREP_PROGRESS_SEND_SECONDS: ${PREP_PROGRESS_SEND_SECONDS:-30}
+      PREP_CANCEL_GRACE_SECONDS: ${PREP_CANCEL_GRACE_SECONDS:-30}
+      PREP_CANCEL_TERM_SECONDS: ${PREP_CANCEL_TERM_SECONDS:-10}
+      PREP_REQUEST_TIMEOUT_SECONDS: ${PREP_REQUEST_TIMEOUT_SECONDS:-30}
     volumes:
       - ${HOST_DB_DIR:-/srv/md-service/db}:/db
       - ${HOST_DATA_DIR:-/srv/md-service/data}:/data
@@ -104,6 +120,40 @@ services:
     gpus: all
     restart: unless-stopped
 
+  prep-worker:
+    image: md-prep-worker:local
+    build:
+      context: ./worker
+      dockerfile: prep_worker.Dockerfile
+    environment:
+      API_URL: http://api:8000
+      WORKER_TOKEN: ${WORKER_TOKEN:?set WORKER_TOKEN}
+      WORKER_ID: ${PREP_WORKER_ID:-prep-0}
+      WORKER_HOSTNAME: ${PREP_WORKER_HOSTNAME:-}
+      PACKMOL_PATH: /opt/worker/packmol-memgen-wrapper
+      WORKER_POLL_SECONDS: ${PREP_POLL_SECONDS:-2}
+      WORKER_HEARTBEAT_SECONDS: ${PREP_HEARTBEAT_SECONDS:-10}
+      WORKER_PROGRESS_POLL_SECONDS: ${PREP_PROGRESS_POLL_SECONDS:-2}
+      WORKER_PROGRESS_SEND_SECONDS: ${PREP_PROGRESS_SEND_SECONDS:-30}
+      WORKER_CANCEL_GRACE_SECONDS: ${PREP_CANCEL_GRACE_SECONDS:-30}
+      WORKER_CANCEL_TERM_SECONDS: ${PREP_CANCEL_TERM_SECONDS:-10}
+      WORKER_REQUEST_TIMEOUT_SECONDS: ${PREP_REQUEST_TIMEOUT_SECONDS:-30}
+    volumes:
+      - ${HOST_DATA_DIR:-/srv/md-service/data}:/data
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    image: md-web:local
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    expose:
+      - "80"
+    restart: unless-stopped
+
   caddy:
     image: caddy:2
     ports:
@@ -117,6 +167,8 @@ services:
       - caddy_config:/config
     depends_on:
       api:
+        condition: service_healthy
+      web:
         condition: service_healthy
     restart: unless-stopped
 

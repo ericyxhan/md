@@ -8,6 +8,17 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app \
     SIMULATION_CONFIG_PATH=/app/config.py
 
+# Runtime libraries needed by numpy/scipy/numba wheels.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        libgomp1 \
+        libgl1 \
+        libxrender1 \
+        libxext6 \
+        libsm6 \
+        libice6 \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 RUN groupadd --gid 10001 mdservice \

@@ -1,9 +1,12 @@
 # Caddy front for the MD service.
 #
-# Only the public API and liveness endpoint are proxied.  Internal worker
+# Only the public API and liveness endpoint are proxied to FastAPI.  The built
+# SPA is served by the web container for every other path, and internal worker
 # routes are answered with 404 so a leaked worker token is not enough to reach
 # them from the internet.
 {$MD_SERVICE_DOMAIN:localhost} {
+	encode zstd gzip
+
 	handle /internal/* {
 		respond 404
 	}
@@ -17,6 +20,6 @@
 	}
 
 	handle {
-		respond 404
+		reverse_proxy web:80
 	}
 }

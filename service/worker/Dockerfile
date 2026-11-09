@@ -9,6 +9,14 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1
 
+# The conda-forge PyTorch build marks libtorch_cpu.so with an executable
+# stack. Newer kernels refuse to dlopen it, which breaks the NAGL charge
+# model used by openff-2.3.0. Clear the flag in this layer.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends patchelf \
+    && patchelf --clear-execstack /opt/param-env/lib/libtorch_cpu.so \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /opt/worker
 
 COPY requirements.txt /tmp/worker-requirements.txt

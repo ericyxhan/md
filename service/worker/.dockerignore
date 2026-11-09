@@ -1,5 +1,5 @@
-__pycache__/
-*.py[cod]
-.pytest_cache/
-tests/
-requirements-dev.txt
+__pycache__
+*.pyc
+.env
+.git
+*.log

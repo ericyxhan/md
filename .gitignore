@@ -11,3 +11,6 @@ outputs/
 input.pdb
 *.dcd
 *.chk
+
+# Docker runtime bind-mount data
+service/.runtime/
