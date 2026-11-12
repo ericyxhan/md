@@ -2,6 +2,8 @@ import type {
   Artifact,
   ArtifactList,
   Capabilities,
+  EventWithJobOut,
+  FileInspect,
   FileOut,
   Job,
   JobCreate,
@@ -18,8 +20,15 @@ import type {
   PrepJobStatus,
   RetryMode,
   SessionInfo,
+  SeriesOut,
   SystemPrepOut,
   SystemPrepRequest,
+  ViewList,
+  WorkflowCreate,
+  WorkflowDetailOut,
+  WorkflowJobSummary,
+  WorkflowOut,
+  WorkflowVariantsRequest,
 } from "./types";
 
 const API_BASE = "/api/v1";
@@ -294,6 +303,14 @@ export function getJobConfig(id: string): Promise<string> {
   });
 }
 
+export function getJobViews(id: string): Promise<ViewList> {
+  return request<ViewList>(`/jobs/${encodeURIComponent(id)}/views`);
+}
+
+export function getJobSeries(id: string): Promise<SeriesOut> {
+  return request<SeriesOut>(`/jobs/${encodeURIComponent(id)}/analysis/series`);
+}
+
 // ---------------------------------------------------------------------------
 // Artifacts and logs
 // ---------------------------------------------------------------------------
@@ -387,6 +404,16 @@ export function prepFileUrl(fileId: string): string {
   return `${API_BASE}/files/${encodeURIComponent(fileId)}`;
 }
 
+/** Inline URL for rendering a raw upload in the viewer (size-guarded). */
+export function filePreviewUrl(fileId: string): string {
+  return `${API_BASE}/files/${encodeURIComponent(fileId)}/preview`;
+}
+
+/** Inspect a stored structure file (PDB only) for chains, ligands, components. */
+export function getFileInspect(fileId: string): Promise<FileInspect> {
+  return request<FileInspect>(`/files/${encodeURIComponent(fileId)}/inspect`);
+}
+
 export function cancelPrepJob(id: string): Promise<{ status: string }> {
   return request<{ status: string }>(`/prep/jobs/${encodeURIComponent(id)}/cancel`, {
     method: "POST",
@@ -406,3 +433,63 @@ export function requestSystemPrep(
   });
 }
 
+/** Download a PDB from RCSB and register it as a file for previewing. */
+export function fetchPdb(pdbId: string): Promise<{ file_id: string }> {
+  return request<{ file_id: string }>("/prep/fetch-pdb", {
+    method: "POST",
+    body: { pdb_id: pdbId },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Workflows
+// ---------------------------------------------------------------------------
+
+export function createWorkflow(
+  payload: WorkflowCreate,
+): Promise<WorkflowOut> {
+  return request<WorkflowOut>("/workflows", {
+    method: "POST",
+    body: payload,
+  });
+}
+
+export function listWorkflows(): Promise<WorkflowOut[]> {
+  return request<WorkflowOut[]>("/workflows");
+}
+
+export function getWorkflow(workflowId: string): Promise<WorkflowDetailOut> {
+  return request<WorkflowDetailOut>(`/workflows/${encodeURIComponent(workflowId)}`);
+}
+
+export function createWorkflowVariants(
+  workflowId: string,
+  payload: WorkflowVariantsRequest,
+): Promise<JobList> {
+  return request<JobList>(
+    `/workflows/${encodeURIComponent(workflowId)}/variants`,
+    { method: "POST", body: payload },
+  );
+}
+
+export function deleteWorkflow(workflowId: string): Promise<void> {
+  return request<void>(`/workflows/${encodeURIComponent(workflowId)}`, {
+    method: "DELETE",
+    expect: "none",
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Cross-job event feed (notification history)
+// ---------------------------------------------------------------------------
+
+export function getEvents(
+  limit?: number,
+  cursor?: string | null,
+): Promise<EventWithJobOut[]> {
+  const query = new URLSearchParams();
+  if (limit) query.set("limit", String(limit));
+  if (cursor) query.set("cursor", cursor);
+  const suffix = query.toString();
+  return request<EventWithJobOut[]>(`/jobs/events${suffix ? `?${suffix}` : ""}`);
+}

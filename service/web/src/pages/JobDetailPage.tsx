@@ -1,14 +1,16 @@
-import { useMemo, useState } from "react";
+import { Suspense, lazy, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
   AlertTriangle,
   ArrowLeft,
+  Atom,
   Ban,
   CircleDot,
   Clock3,
   Database,
+  Droplets,
   FileCode2,
   History,
   Loader2,
@@ -16,18 +18,23 @@ import {
   RotateCcw,
   ScrollText,
   Terminal,
+  Thermometer,
 } from "lucide-react";
-import type { Job, JobEvent, RetryMode } from "../lib/types";
+import type { Job, JobEvent, RetryMode, ViewManifest } from "../lib/types";
 import { ApiError, cancelJob, retryJob } from "../lib/api";
 import {
   useArtifacts,
+  useCapabilities,
   useJob,
   useJobConfig,
   useJobEvents,
   useJobSpec,
+  useJobViews,
 } from "../lib/queries";
 import { useJobStream } from "../lib/useJobStream";
 import { useToast } from "../components/ui/Toast";
+import { AnalysisPanel } from "../components/analysis/AnalysisPanel";
+import { LazyStructureViewport } from "../components/viewer/lazy";
 import { Button } from "../components/ui/Button";
 import { Badge, StatusBadge } from "../components/ui/Badge";
 import { Card, CardHeader } from "../components/ui/Card";
@@ -54,7 +61,158 @@ import {
   titleCase,
 } from "../lib/utils";
 
-type Tab = "activity" | "artifacts" | "logs" | "configuration";
+type Tab =
+  | "structure"
+  | "activity"
+  | "artifacts"
+  | "logs"
+  | "configuration"
+  | "analysis";
+
+function ionSummary(manifest: ViewManifest): string {
+  return manifest.ions.length
+    ? manifest.ions
+        .map((ion) => `${ion.name} ×${formatCompact(ion.count)}`)
+        .join(" · ")
+    : "—";
+}
+
+function ligandSummary(manifest: ViewManifest): string {
+  return manifest.ligands.length
+    ? manifest.ligands
+        .map((ligand) => `${ligand.name} ×${ligand.residues}`)
+        .join(" · ")
+    : "—";
+}
+
+function boxSummary(manifest: ViewManifest): string {
+  const box = manifest.box;
+  if (!box) return "—";
+  return `${box.a.toFixed(1)} × ${box.b.toFixed(1)} × ${box.c.toFixed(1)} Å`;
+}
+
+function StructurePanel({
+  jobId,
+  poll,
+  maxViewAtoms,
+}: {
+  jobId: string;
+  poll: boolean;
+  maxViewAtoms?: number;
+}) {
+  const views = useJobViews(jobId, true, poll);
+
+  if (views.isLoading) {
+    return (
+      <div className="flex items-center gap-2 px-5 py-8 text-[12.5px] text-muted">
+        <Spinner /> Loading structure
+      </div>
+    );
+  }
+
+  if (views.isError) {
+    return (
+      <div className="px-5 py-8">
+        <EmptyState
+          icon={<AlertTriangle className="size-5" />}
+          title="Structure views unavailable"
+          description={
+            views.error instanceof Error
+              ? views.error.message
+              : "The view inventory could not be loaded."
+          }
+        />
+      </div>
+    );
+  }
+
+  const prepared = views.data?.items.find((view) => view.group === "prepared");
+
+  if (!prepared?.structure) {
+    return (
+      <EmptyState
+        icon={<Atom className="size-5" />}
+        title="No structure view yet"
+        description={
+          poll
+            ? "The built system appears here as soon as the worker finishes preparing it."
+            : "This run has no derived structure view. Raw artifacts remain available in the Artifacts tab."
+        }
+      />
+    );
+  }
+
+  const manifest = prepared.manifest_data;
+
+  return (
+    <div className="px-5 py-4">
+      <div className="h-[420px] overflow-hidden rounded-xl border border-line bg-surface sm:h-[500px]">
+        <Suspense
+          fallback={
+            <div className="flex h-full items-center justify-center gap-2 text-[12.5px] text-muted">
+              <Spinner /> Loading viewer
+            </div>
+          }
+        >
+          <LazyStructureViewport
+            url={prepared.structure.url}
+            label={prepared.structure.name}
+          />
+        </Suspense>
+      </div>
+
+      {manifest ? (
+        <>
+          <p className="mt-3 text-[12.5px] leading-relaxed text-muted">
+            Built system with solvent removed for display —{" "}
+            {formatCompact(manifest.source_atoms)} atoms in the full system
+            {manifest.water_residues
+              ? `, including ${formatCompact(manifest.water_residues)} waters`
+              : ""}
+            {manifest.ion_atoms
+              ? ` and ${formatCompact(manifest.ion_atoms)} ion atoms`
+              : ""}
+            . Raw artifacts stay downloadable from the Artifacts tab.
+          </p>
+
+          {manifest.truncated ? (
+            <p className="mt-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11.5px] leading-relaxed text-amber-900">
+              <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-amber-600" />
+              The solute exceeds the view budget
+              {maxViewAtoms
+                ? ` of ${formatCompact(maxViewAtoms)} atoms`
+                : ""}
+              ; later atoms are hidden from this view.
+            </p>
+          ) : null}
+
+          <div className="mt-3 grid grid-cols-2 gap-3 border-t border-line pt-4 sm:grid-cols-3 lg:grid-cols-6">
+            <Metric
+              label="Solute atoms"
+              value={formatCompact(manifest.view_atoms)}
+            />
+            <Metric
+              label="System atoms"
+              value={formatCompact(manifest.source_atoms)}
+            />
+            <Metric
+              label="Waters removed"
+              value={formatCompact(manifest.water_residues)}
+            />
+            <Metric label="Ions" value={ionSummary(manifest)} />
+            <Metric label="Ligands" value={ligandSummary(manifest)} />
+            <Metric label="Box" value={boxSummary(manifest)} />
+          </div>
+        </>
+      ) : (
+        <p className="mt-3 text-[12.5px] text-muted">
+          {prepared.structure.name} — a solute-focused view of the built
+          system.
+        </p>
+      )}
+    </div>
+  );
+}
 
 function Metric({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -234,11 +392,12 @@ export function JobDetailPage() {
   const { id } = useParams<{ id: string }>();
   const queryClient = useQueryClient();
   const toast = useToast();
+  const capabilities = useCapabilities();
   const jobQuery = useJob(id);
   const eventsQuery = useJobEvents(id);
   const { connected, liveEvents } = useJobStream(id);
   const artifacts = useArtifacts(id, true);
-  const [tab, setTab] = useState<Tab>("activity");
+  const [selectedTab, setSelectedTab] = useState<Tab | null>(null);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [retryOpen, setRetryOpen] = useState(false);
 
@@ -303,6 +462,13 @@ export function JobDetailPage() {
   const terminal = isTerminal(job.status);
   const active = isActive(job.status);
   const artifactsCount = artifacts.data?.items.length ?? 0;
+  // Views are a capability: older workers never produce them, and the tab
+  // (and its fetches) disappear entirely when the feature is off.
+  const viewsEnabled = capabilities.data?.views?.enabled !== false;
+  // The molecule is the hero: completed runs open straight onto the built
+  // system. Until the user picks a tab, "activity" covers runs in flight.
+  const tab: Tab =
+    selectedTab ?? (job.status === "completed" && viewsEnabled ? "structure" : "activity");
 
   return (
     <div>
@@ -426,6 +592,15 @@ export function JobDetailPage() {
             <div className="flex flex-wrap items-center gap-1 border-b border-line px-3 py-2">
               {(
                 [
+                  ...(viewsEnabled
+                    ? [
+                        {
+                          id: "structure" as const,
+                          label: "Structure",
+                          icon: Atom,
+                        },
+                      ]
+                    : []),
                   {
                     id: "activity" as const,
                     label: "Activity",
@@ -444,6 +619,11 @@ export function JobDetailPage() {
                     label: "Configuration",
                     icon: FileCode2,
                   },
+                  {
+                    id: "analysis" as const,
+                    label: "Analysis",
+                    icon: Thermometer,
+                  },
                 ]
               ).map((item) => {
                 const Icon = item.icon;
@@ -451,7 +631,7 @@ export function JobDetailPage() {
                   <button
                     key={item.id}
                     type="button"
-                    onClick={() => setTab(item.id)}
+                    onClick={() => setSelectedTab(item.id)}
                     className={cn(
                       "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] font-medium transition",
                       tab === item.id
@@ -477,6 +657,14 @@ export function JobDetailPage() {
                 );
               })}
             </div>
+
+            {tab === "structure" ? (
+              <StructurePanel
+                jobId={job.id}
+                poll={active}
+                maxViewAtoms={capabilities.data?.views?.max_view_atoms}
+              />
+            ) : null}
 
             {tab === "activity" ? (
               <div className="px-5 py-4">
@@ -510,6 +698,10 @@ export function JobDetailPage() {
 
             {tab === "configuration" ? (
               <ConfigurationPanel jobId={job.id} />
+            ) : null}
+
+            {tab === "analysis" ? (
+              <AnalysisPanel jobId={job.id} />
             ) : null}
           </Card>
         </div>

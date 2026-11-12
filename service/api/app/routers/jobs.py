@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, Depends, Header, Query, Request
 from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 from sqlalchemy.orm import Session
@@ -12,6 +14,7 @@ from ..schemas import (
     ArtifactListOut,
     ArtifactOut,
     EventOut,
+    EventWithJobOut,
     JobCreate,
     JobListOut,
     JobOut,
@@ -21,10 +24,15 @@ from ..schemas import (
     LogOut,
     LogTailOut,
     RetryRequest,
+    SeriesOut,
+    ViewFileOut,
+    ViewListOut,
+    ViewOut,
 )
 from ..security import require_owner
 from ..services.artifacts import (
     artifact_path,
+    build_job_views,
     get_artifact,
     get_log,
     list_artifacts,
@@ -38,10 +46,12 @@ from ..services.jobs import (
     get_owned_job,
     job_to_dict,
     list_events,
+    list_events_across_jobs,
     list_jobs,
     validate_job,
 )
 from ..services.lifecycle import cancel_job, retry_job
+from ..services.queue import queue_positions
 from ..services.stream import job_event_stream
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
@@ -105,10 +115,35 @@ def list_all(
     jobs, next_cursor = list_jobs(
         session, owner, status=status, limit=limit, cursor=cursor
     )
+    # One ranked query for the whole page instead of a COUNT per job.
+    positions = queue_positions(session, jobs)
     return JobListOut(
-        items=[JobOut.model_validate(job_to_dict(session, job)) for job in jobs],
+        items=[
+            JobOut.model_validate(
+                job_to_dict(session, job, queue_positions=positions)
+            )
+            for job in jobs
+        ],
         next_cursor=next_cursor,
     )
+
+
+@router.get("/events", response_model=list[EventWithJobOut])
+def list_events_all(
+    limit: int = Query(default=50, ge=1, le=200),
+    cursor: str | None = Query(default=None),
+    owner: str = Depends(require_owner),
+    session: Session = Depends(get_session),
+) -> list[EventWithJobOut]:
+    """Recent events across all jobs owned by the caller.
+
+    Returns events joined with their parent job, newest first, so a user
+    can scan a single notification history and click through to any job.
+    """
+    events, _next_cursor = list_events_across_jobs(
+        session, owner, limit=limit, cursor=cursor
+    )
+    return [EventWithJobOut.model_validate(event) for event in events]
 
 
 @router.get("/{job_id}", response_model=JobOut)
@@ -199,6 +234,136 @@ def stream_events(
     )
 
 
+@router.get("/{job_id}/views", response_model=ViewListOut)
+def get_views(
+    request: Request,
+    job_id: str,
+    owner: str = Depends(require_owner),
+    session: Session = Depends(get_session),
+) -> ViewListOut:
+    """Browser-oriented inventory of derived structure/trajectory views.
+
+    Views are small, solute-focused derivatives written by the worker under
+    ``outputs/views/``; this endpoint groups them by view (``prepared`` or a
+    stage name) and inlines the JSON manifest so the client can caption the
+    structure without extra requests. File contents are fetched through the
+    regular artifact download route referenced by ``url``.
+    """
+
+    job = get_owned_job(session, owner, job_id)
+    base = f"/api/v1/jobs/{job.id}/artifacts"
+
+    def file_out(artifact) -> ViewFileOut:
+        return ViewFileOut(
+            id=artifact.id,
+            name=safe_download_name(artifact.relative_path),
+            relative_path=artifact.relative_path,
+            size_bytes=artifact.size_bytes,
+            url=f"{base}/{artifact.id}",
+        )
+
+    items: list[ViewOut] = []
+    for summary in build_job_views(session, request.app.state.storage, job):
+        files = summary.files
+        items.append(
+            ViewOut(
+                group=files.group,
+                structure=(
+                    file_out(files.structure) if files.structure else None
+                ),
+                trajectory=(
+                    file_out(files.trajectory) if files.trajectory else None
+                ),
+                manifest=file_out(files.manifest) if files.manifest else None,
+                manifest_data=summary.manifest_data,
+            )
+        )
+    return ViewListOut(items=items)
+
+
+@router.get("/{job_id}/analysis/series", response_model=SeriesOut)
+def get_job_series(
+    request: Request,
+    job_id: str,
+    owner: str = Depends(require_owner),
+    session: Session = Depends(get_session),
+) -> SeriesOut:
+    """Downsampled time series from a stage's simulation.log.
+
+    Returns the worker-generated ``outputs/analysis/series.json`` for the
+    most recent completed stage that has a state log.  Points are
+    server-downsampled to at most 2,000 with minima and maxima preserved.
+    """
+
+    job = get_owned_job(session, owner, job_id)
+    storage = request.app.state.storage
+
+    artifacts = list_artifacts(session, job, kind="analysis")
+    series_artifacts = [
+        item
+        for item in artifacts
+        if item.relative_path.endswith("outputs/analysis/series.json")
+    ]
+    if not series_artifacts:
+        raise APIError(
+            404,
+            "series_not_found",
+            "No analysis series is available for this job.",
+        )
+
+    # Prefer the latest completed stage's series (artifacts are sorted by
+    # stage name; series.json is shared across stages, so take the first).
+    artifact = series_artifacts[0]
+    path = artifact_path(storage, job, artifact)
+    if not path.is_file():
+        raise APIError(
+            404,
+            "series_not_found",
+            "Analysis series file is unavailable.",
+        )
+
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise APIError(
+            500,
+            "series_read_failed",
+            f"Could not read analysis series: {exc}",
+        ) from exc
+
+    # Map raw simulation.log column names to SeriesPoint schema fields.
+    _COLUMN_MAP = {
+        "Step": "step",
+        "Time (ps)": "time_ps",
+        "Potential Energy (kJ/mole)": "potential_energy_kj_mol",
+        "Kinetic Energy (kJ/mole)": "kinetic_energy_kj_mol",
+        "Temperature (K)": "temperature_k",
+        "Density (g/mL)": "density_g_ml",
+        "Box Volume (nm^3)": "volume_nm3",
+        "Speed (ns/day)": "speed_ns_day",
+        "Elapsed Time (s)": "elapsed_s",
+    }
+
+    raw_columns = data.get("columns", [])
+    raw_points = data.get("points", [])
+    columns = [_COLUMN_MAP.get(c, c) for c in raw_columns]
+    points = []
+    for raw_point in raw_points:
+        point = {}
+        for col, value in raw_point.items():
+            point[_COLUMN_MAP.get(col, col)] = value
+        points.append(point)
+
+    return SeriesOut(
+        group=data.get("group", ""),
+        source=data.get("source", ""),
+        source_points=data.get("source_points", 0),
+        view_points=data.get("view_points", 0),
+        columns=columns,
+        points=points,
+    )
+
+
 @router.get("/{job_id}/artifacts", response_model=ArtifactListOut)
 def get_artifacts(
     job_id: str,
@@ -212,13 +377,12 @@ def get_artifacts(
     return ArtifactListOut(items=[_artifact_out(item) for item in artifacts])
 
 
-@router.get("/{job_id}/artifacts/{artifact_id}")
-def download_artifact(
+def _artifact_response(
     request: Request,
     job_id: str,
     artifact_id: str,
-    owner: str = Depends(require_owner),
-    session: Session = Depends(get_session),
+    owner: str,
+    session: Session,
 ) -> FileResponse:
     job = get_owned_job(session, owner, job_id)
     artifact = get_artifact(session, job, artifact_id)
@@ -230,6 +394,34 @@ def download_artifact(
         content_disposition_type="attachment",
         headers={"X-Content-Type-Options": "nosniff"},
     )
+
+
+@router.get("/{job_id}/artifacts/{artifact_id}")
+def download_artifact(
+    request: Request,
+    job_id: str,
+    artifact_id: str,
+    owner: str = Depends(require_owner),
+    session: Session = Depends(get_session),
+) -> FileResponse:
+    return _artifact_response(request, job_id, artifact_id, owner, session)
+
+
+@router.head("/{job_id}/artifacts/{artifact_id}", include_in_schema=False)
+def download_artifact_head(
+    request: Request,
+    job_id: str,
+    artifact_id: str,
+    owner: str = Depends(require_owner),
+    session: Session = Depends(get_session),
+) -> FileResponse:
+    """Return the artifact headers without the body.
+
+    The viewer asks for the headers before it loads a structure, so a
+    missing artifact shows as an error instead of an empty scene.
+    """
+
+    return _artifact_response(request, job_id, artifact_id, owner, session)
 
 
 @router.get("/{job_id}/logs", response_model=LogListOut)

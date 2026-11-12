@@ -52,6 +52,19 @@ class Settings(BaseSettings):
     allow_pdb_download: bool = True
     pdb_download_timeout_seconds: float = Field(default=30.0, gt=0, le=120)
 
+    # -- Browser views ----------------------------------------------------
+    # Derived, solute-focused structure/trajectory views served to the web
+    # console. Disabling hides the interactive viewer without affecting
+    # artifact downloads.
+    views_enabled: bool = True
+    # Raw uploads served inline for direct rendering; larger files stay
+    # download-only and are meant to be viewed through derived views.
+    max_preview_bytes: int = Field(default=10 * MIB, ge=1)
+    # Atom budget for a derived preview of a file that is too large to serve
+    # raw.  The solvent and ions are removed first, so this only bites on
+    # very large solute systems.
+    max_preview_atoms: int = Field(default=100_000, ge=1)
+
     # -- System preparation -----------------------------------------------
     # Path to the Packmol-Memgen executable used by membrane embedding.  If
     # unset, prep endpoints return 503.
@@ -69,6 +82,10 @@ class Settings(BaseSettings):
     # -- Upload and job limits -------------------------------------------
     max_upload_bytes: int = Field(default=50 * MIB, ge=1)
     max_job_upload_bytes: int = Field(default=100 * MIB, ge=1)
+    # Atom budget for a single uploaded structure.  The simulation cost grows
+    # with the atom count, so this is the limit that actually bounds the GPU
+    # time a single upload can cost.
+    max_upload_atoms: int = Field(default=250_000, ge=1)
     max_ligands: int = Field(default=20, ge=1, le=100)
     max_equilibration_stages: int = Field(default=10, ge=1, le=50)
     max_steps_per_stage: int = Field(default=50_000_000, ge=1)
@@ -96,6 +113,15 @@ class Settings(BaseSettings):
     docs_enabled: bool = True
     log_level: str = "INFO"
     rate_limit_requests_per_minute: int = Field(default=120, ge=0, le=100_000)
+
+    # -- Reverse proxy ----------------------------------------------------
+    # The API is only reachable through Caddy, which rewrites
+    # X-Forwarded-For to the client address it resolved from the proxy chain.
+    # Trusting that header keeps the per-IP rate limiter and the audit trail
+    # honest when the service is published through a tunnel, where every
+    # connection would otherwise look like it came from the local proxy.
+    # Disable it when running the API directly without a proxy in front.
+    trust_forwarded_for: bool = True
 
     @field_validator("data_root")
     @classmethod

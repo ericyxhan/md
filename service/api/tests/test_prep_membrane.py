@@ -70,6 +70,45 @@ def test_membrane_embed_requires_packmol_path(tmp_path):
     assert response.json()["error"]["code"] == "prep_not_configured"
 
 
+def test_prep_job_activity_appears_in_the_account_event_feed(tmp_path):
+    """Prep jobs keep their own event log, but the account-wide activity
+    feed has to show them: a membrane embedding is as much a part of the
+    user's work as a simulation."""
+    client, _ = _client(tmp_path, packmol_path="/usr/bin/packmol-memgen")
+    upload = client.post(
+        "/api/v1/files",
+        headers={"Authorization": f"Bearer {TEST_TOKEN}"},
+        files={"file": ("protein.pdb", b"HEADER\nEND\n", "chemical/x-pdb")},
+    )
+    file_id = upload.json()["id"]
+
+    response = client.post(
+        "/api/v1/prep/membrane",
+        headers={"Authorization": f"Bearer {TEST_TOKEN}"},
+        json={
+            "protein_file_id": file_id,
+            "lipid": "POPC",
+            "box_padding_nm": 1.5,
+        },
+    )
+    assert response.status_code == 200
+    prep_job_id = response.json()["prep_job_id"]
+
+    feed = client.get(
+        "/api/v1/jobs/events",
+        headers={"Authorization": f"Bearer {TEST_TOKEN}"},
+    )
+    assert feed.status_code == 200
+    events = feed.json()
+
+    created = [e for e in events if e["source"] == "prep"]
+    assert created, "prep job produced no activity-feed entries"
+    assert created[0]["type"] == "created"
+    assert created[0]["job_id"] == prep_job_id
+    assert created[0]["prep_type"] == "membrane_embed"
+    assert "POPC" in created[0]["job_name"]
+
+
 def test_membrane_embed_queues_job(tmp_path):
     """With PACKMOL_PATH set, the endpoint queues a job and returns 200."""
     client, _ = _client(tmp_path, packmol_path="/usr/bin/packmol-memgen")

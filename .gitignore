@@ -14,3 +14,9 @@ input.pdb
 
 # Docker runtime bind-mount data
 service/.runtime/
+# packmol-memgen writes its config and log into the working directory
+packmol-memgen.json
+packmol-memgen.log
+
+# Local agent state: notes about this checkout, not part of the project.
+.opencode/

@@ -1,0 +1,17 @@
+[Unit]
+Description=Tailscale daemon (userspace networking mode)
+Documentation=https://tailscale.com/docs
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+# Userspace mode needs no root: the daemon proxies connections itself instead
+# of creating a kernel tunnel device.  Kernel mode is faster but requires
+# CAP_NET_ADMIN.
+ExecStart=%h/.local/share/tailscale-pkg/usr/sbin/tailscaled --state=%h/.local/share/tailscale/tailscaled.state --socket=%h/.local/share/tailscale/tailscaled.sock --tun=userspace-networking --port=0
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

@@ -132,6 +132,75 @@ def test_docs_can_be_disabled(settings: Settings) -> None:
         assert client.get("/healthz").status_code == 200
 
 
+def _first_audit_row(app) -> AuditEvent:
+    with app.state.session_factory() as session:
+        row = session.scalars(
+            select(AuditEvent).order_by(AuditEvent.id.asc())
+        ).first()
+    assert row is not None
+    return row
+
+
+def test_client_ip_is_taken_from_the_forwarding_header(
+    client, app, auth, upload
+) -> None:
+    """Behind a proxy the audit trail must record the real client."""
+
+    file = upload("complex.pdb").json()
+    created = client.post(
+        "/api/v1/jobs",
+        headers={**auth, "X-Forwarded-For": "203.0.113.7"},
+        json=job_payload(file["id"]),
+    )
+    assert created.status_code == 202, created.text
+    assert _first_audit_row(app).remote_addr == "203.0.113.7"
+
+
+def test_client_ip_falls_back_to_the_socket_peer(
+    client, app, auth, upload
+) -> None:
+    """Without a proxy in front the peer address is the client."""
+
+    file = upload("complex.pdb").json()
+    created = client.post(
+        "/api/v1/jobs", headers=auth, json=job_payload(file["id"])
+    )
+    assert created.status_code == 202, created.text
+    assert _first_audit_row(app).remote_addr == "testclient"
+
+
+def test_forwarded_header_is_ignored_when_untrusted(
+    settings: Settings,
+) -> None:
+    """Running the API without a proxy must not honour client headers."""
+
+    settings.trust_forwarded_for = False
+    upgrade_database(settings.database_url)
+    app = create_app(settings)
+    headers = {"Authorization": f"Bearer {TEST_TOKEN}"}
+
+    with TestClient(app) as client:
+        file = client.post(
+            "/api/v1/files",
+            headers=headers,
+            files={
+                "file": (
+                    "complex.pdb",
+                    b"HEADER\n",
+                    "chemical/x-pdb",
+                )
+            },
+        ).json()
+        created = client.post(
+            "/api/v1/jobs",
+            headers={**headers, "X-Forwarded-For": "203.0.113.7"},
+            json=job_payload(file["id"]),
+        )
+        assert created.status_code == 202, created.text
+
+    assert _first_audit_row(app).remote_addr == "testclient"
+
+
 def test_structured_log_contains_request_id_and_safe_fields() -> None:
     stream = io.StringIO()
     handler = logging.StreamHandler(stream)

@@ -299,3 +299,219 @@ def _is_likely_ligand(resname: str) -> bool:
     if len(upper) <= 2 and upper.isalpha():
         return False
     return True
+
+
+# ---------------------------------------------------------------------------
+# Explicit residue selection (click/drag-driven editing)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ResidueSpec:
+    """A residue identified by chain, sequence number, and insertion code."""
+
+    chain: str
+    resnum: int
+    icode: str = " "
+
+
+def _parse_residue_specs(specs: list[dict[str, Any]]) -> set[ResidueSpec]:
+    """Parse a list of {chain, resnum, icode} dicts into ResidueSpecs."""
+    parsed: set[ResidueSpec] = set()
+    for spec in specs:
+        chain = str(spec["chain"])
+        resnum = int(spec["resnum"])
+        icode = str(spec.get("icode", " "))
+        parsed.add(ResidueSpec(chain=chain, resnum=resnum, icode=icode))
+    return parsed
+
+
+def _match_residue(chain_name: str, residue: gemmi.Residue, specs: set[ResidueSpec]) -> bool:
+    """Return True when *residue* matches one of *specs*."""
+    return ResidueSpec(
+        chain=chain_name,
+        resnum=int(residue.seqid.num),
+        icode=residue.seqid.icode,
+    ) in specs
+
+
+def remove_residues(
+    pdb_path: Path,
+    residue_specs: list[dict[str, Any]],
+    output_path: Path,
+) -> Path:
+    """Remove the explicitly listed residues from a PDB.
+
+    *residue_specs* is a list of ``{"chain": str, "resnum": int, "icode": str}``
+    dicts.  Returns the output path.
+    """
+
+    specs = _parse_residue_specs(residue_specs)
+    structure = gemmi.read_structure(str(pdb_path))
+    for model in structure:
+        # Collect chain names first so we don't mutate the model while
+        # iterating over it (remove_chain/add_chain corrupts the iterator).
+        chain_names = [chain.name for chain in model]
+        for chain_name in chain_names:
+            chain = model[chain_name]
+            kept = [
+                residue.clone()
+                for residue in chain
+                if not _match_residue(chain_name, residue, specs)
+            ]
+            _replace_chain_residues(model, chain_name, kept)
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    structure.write_pdb(str(output_path))
+    return output_path
+
+
+def keep_selection(
+    pdb_path: Path,
+    residue_specs: list[dict[str, Any]],
+    output_path: Path,
+) -> Path:
+    """Keep only the explicitly listed residues, removing everything else.
+
+    *residue_specs* is a list of ``{"chain": str, "resnum": int, "icode": str}``
+    dicts.  Returns the output path.
+    """
+
+    specs = _parse_residue_specs(residue_specs)
+    structure = gemmi.read_structure(str(pdb_path))
+    for model in structure:
+        chain_names = [chain.name for chain in model]
+        for chain_name in chain_names:
+            chain = model[chain_name]
+            kept = [
+                residue.clone()
+                for residue in chain
+                if _match_residue(chain_name, residue, specs)
+            ]
+            _replace_chain_residues(model, chain_name, kept)
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    structure.write_pdb(str(output_path))
+    return output_path
+
+
+# ---------------------------------------------------------------------------
+# Detailed structure inspection (for the /files/{id}/inspect endpoint)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ChainInfo:
+    chain_id: str
+    residue_names: list[str]
+    residue_count: int
+    atom_count: int
+
+
+def inspect_structure(pdb_path: Path) -> dict[str, Any]:
+    """Inspect a PDB file and return a detailed summary for the viewer UI.
+
+    Returns chains, residue ranges, components (protein / water / ion / ligand
+    atom counts), total atom count, model count, and a bounding box.
+    """
+
+    structure = gemmi.read_structure(str(pdb_path))
+    chains: dict[str, ChainInfo] = {}
+    atom_count = 0
+    model_count = 0
+    min_pos = None
+    max_pos = None
+
+    protein_atoms = 0
+    water_atoms = 0
+    ion_atoms = 0
+    ligand_atoms = 0
+
+    for model in structure:
+        model_count += 1
+        for chain in model:
+            cid = chain.name
+            if cid not in chains:
+                chains[cid] = ChainInfo(
+                    chain_id=cid,
+                    residue_names=[],
+                    residue_count=0,
+                    atom_count=0,
+                )
+            chain_info = chains[cid]
+            residue_names: list[str] = []
+            residue_count = 0
+            chain_atom_count = 0
+
+            for residue in chain:
+                rname = residue.name.strip().upper()
+                residue_names.append(rname)
+                residue_count += 1
+                res_atoms = 0
+                for atom in residue:
+                    atom_count += 1
+                    chain_atom_count += 1
+                    res_atoms += 1
+                    pos = atom.pos
+                    if min_pos is None:
+                        min_pos = gemmi.Position(pos.x, pos.y, pos.z)
+                        max_pos = gemmi.Position(pos.x, pos.y, pos.z)
+                    else:
+                        min_pos.x = min(min_pos.x, pos.x)
+                        min_pos.y = min(min_pos.y, pos.y)
+                        min_pos.z = min(min_pos.z, pos.z)
+                        max_pos.x = max(max_pos.x, pos.x)
+                        max_pos.y = max(max_pos.y, pos.y)
+                        max_pos.z = max(max_pos.z, pos.z)
+
+                if _is_likely_ligand(rname):
+                    ligand_atoms += res_atoms
+                elif rname in {"HOH", "WAT", "O", "OH2"}:
+                    water_atoms += res_atoms
+                elif rname in {"NA", "CL", "K", "CA", "MG", "ZN", "FE", "CU", "MN", "CO", "NI"}:
+                    ion_atoms += res_atoms
+                else:
+                    protein_atoms += res_atoms
+
+            # Rebuild ChainInfo with final counts (dataclass is frozen).
+            chains[cid] = ChainInfo(
+                chain_id=cid,
+                residue_names=sorted(set(residue_names)),
+                residue_count=residue_count,
+                atom_count=chain_atom_count,
+            )
+
+    bounding_box = None
+    if min_pos is not None and max_pos is not None:
+        bounding_box = {
+            "min": {"x": min_pos.x, "y": min_pos.y, "z": min_pos.z},
+            "max": {"x": max_pos.x, "y": max_pos.y, "z": max_pos.z},
+        }
+
+    return {
+        "chains": {
+            cid: {
+                "residues": info.residue_names,
+                "residue_count": info.residue_count,
+                "atom_count": info.atom_count,
+            }
+            for cid, info in chains.items()
+        },
+        "ligands": sorted(
+            {
+                rname
+                for info in chains.values()
+                for rname in info.residue_names
+                if _is_likely_ligand(rname)
+            }
+        ),
+        "components": {
+            "protein": protein_atoms,
+            "water": water_atoms,
+            "ion": ion_atoms,
+            "ligand": ligand_atoms,
+        },
+        "atom_count": atom_count,
+        "model_count": model_count,
+        "bounding_box": bounding_box,
+    }

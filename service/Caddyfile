@@ -4,22 +4,53 @@
 # SPA is served by the web container for every other path, and internal worker
 # routes are answered with 404 so a leaked worker token is not enough to reach
 # them from the internet.
-{$MD_SERVICE_DOMAIN:localhost} {
+#
+# TLS is terminated by Tailscale Funnel in front of this proxy, so Caddy
+# listens on plain HTTP and is published on the loopback interface only.
+#
+# ``trusted_proxies`` lets Caddy recover the real client address from the
+# X-Forwarded-For header that Funnel sets.  Without it every request would
+# look like it came from the Docker bridge, which would collapse the per-IP
+# login limiter into a single global bucket.
+#
+# Trusting the private ranges is safe here because this proxy is published on
+# the loopback interface only: the only things that can reach it are the
+# funnel connector on this host and the compose network.  Caddy resolves the
+# client address from the rightmost untrusted entry in the chain, so a
+# spoofed header cannot win over the address the tunnel observed.
+#
+# The ports and prefixes come from service/contract.env so they cannot drift
+# away from the containers and the API router.  The defaults match that file;
+# scripts/check-contract.py asserts that they still do.
+{
+	auto_https off
+	servers {
+		trusted_proxies static 127.0.0.0/8 172.16.0.0/12
+	}
+}
+
+:{$MD_EDGE_PORT:8080} {
 	encode zstd gzip
 
-	handle /internal/* {
+	handle {$MD_INTERNAL_PREFIX:/internal/v1}/* {
 		respond 404
 	}
 
 	handle /api/* {
-		reverse_proxy api:8000
+		reverse_proxy api:{$MD_API_PORT:8000} {
+			# Rewrite the forwarding chain to the single address Caddy
+			# resolved, so the API never has to guess which hop to trust.
+			header_up X-Forwarded-For {client_ip}
+		}
 	}
 
 	handle /healthz {
-		reverse_proxy api:8000
+		reverse_proxy api:{$MD_API_PORT:8000} {
+			header_up X-Forwarded-For {client_ip}
+		}
 	}
 
 	handle {
-		reverse_proxy web:80
+		reverse_proxy web:{$MD_WEB_PORT:80}
 	}
 }

@@ -16,6 +16,7 @@ import argparse
 import signal
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
@@ -31,7 +32,7 @@ from config import (
     WorkerConfig,
     load_config,
 )
-from progress import read_progress
+from progress import ProgressSnapshot, read_progress
 from reconcile import (
     STAGE_NAME_RE,
     STAGE_STATUSES,
@@ -47,6 +48,7 @@ from runner import (
     apply_restart_mode,
     build_command,
 )
+from views import generate_views
 
 SLEEP_SLICE_SECONDS = 0.2
 FINISH_ATTEMPTS = 3
@@ -551,16 +553,20 @@ class Worker:
         try:
             cancel = self._send_stage_updates(claim, manifests, force=False)
             cancel = (
-                self._send_manifest_progress(claim, manifests) or cancel
+                self._send_manifest_progress(claim, manifests, snapshot) or cancel
             )
         except LostJob:
             return "lost"
         return "cancel" if cancel else None
 
     def _send_manifest_progress(
-        self, claim: ClaimedJob, manifests: dict[str, StageManifest]
+        self,
+        claim: ClaimedJob,
+        manifests: dict[str, StageManifest],
+        snapshot: ProgressSnapshot | None = None,
     ) -> bool:
-        snapshot = read_progress(claim.job_root / "progress.json")
+        if snapshot is None:
+            snapshot = read_progress(claim.job_root / "progress.json")
         if snapshot is not None and snapshot.api_phase is not None:
             return False
         targets = claim.stage_targets
@@ -697,6 +703,19 @@ class Worker:
             stderr_path=stderr_path,
             stdout_path=stdout_path,
         )
+        try:
+            created_views = self._generate_views(claim)
+            if created_views:
+                self._job_log(
+                    claim,
+                    "generated views: "
+                    + ", ".join(
+                        view.relative_to(claim.job_root).as_posix()
+                        for view in created_views
+                    ),
+                )
+        except Exception as exc:  # views are cosmetic; never fail a job
+            self._job_log(claim, f"view generation failed: {exc}")
         artifacts = scan_artifacts(
             claim.job_root,
             claim.stage_names,
@@ -745,6 +764,40 @@ class Worker:
                 return
             if attempt < FINISH_ATTEMPTS:
                 self._sleep(float(attempt))
+
+    def _generate_views(self, claim: ClaimedJob) -> list[Path]:
+        """Generate the browser views while renewing the job lease.
+
+        The lease is only extended by heartbeats and progress posts.  A long
+        view generation (a big system with several stages) would let the
+        reaper expire the lease, mark the job ``worker_lost`` and discard a
+        successful run, so the views are built on a worker thread and the
+        lease is renewed until they are done.
+        """
+
+        created: list[Path] = []
+        failure: BaseException | None = None
+
+        def _run() -> None:
+            nonlocal created, failure
+            try:
+                created = generate_views(claim.job_root)
+            except BaseException as exc:  # noqa: BLE001 - re-raised below
+                failure = exc
+
+        thread = threading.Thread(
+            target=_run, name="view-generation", daemon=True
+        )
+        thread.start()
+        interval = max(5.0, self.config.heartbeat_seconds)
+        while thread.is_alive():
+            thread.join(timeout=interval)
+            if thread.is_alive():
+                self._heartbeat(claim)
+
+        if failure is not None:
+            raise failure
+        return created
 
     def _decide(
         self,

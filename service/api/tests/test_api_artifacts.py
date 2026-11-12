@@ -140,6 +140,15 @@ def test_list_filter_and_download_artifacts(
     assert download.status_code == 200, download.text
     assert download.content == b"DCD" * 100
     assert download.headers["content-type"] == "application/octet-stream"
+
+    # The viewer asks for the headers before it loads a structure.
+    head = client.head(
+        f"/api/v1/jobs/{job['id']}/artifacts/{trajectory['id']}",
+        headers=auth,
+    )
+    assert head.status_code == 200, head.text
+    assert head.headers["content-type"] == "application/octet-stream"
+    assert head.content == b""
     assert "attachment" in download.headers["content-disposition"]
     assert download.headers["x-content-type-options"] == "nosniff"
 

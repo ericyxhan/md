@@ -17,3 +17,11 @@ input.pdb
 Dockerfile
 .dockerignore
 docker-compose.yml
+
+# Never let a deployment secret enter the build context.  The root Dockerfile
+# copies the whole tree, so without this the tokens and the password hash
+# would be sent to the daemon and land in an image layer.
+.env
+**/.env
+service/.runtime/
+.opencode/

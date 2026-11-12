@@ -3,3 +3,6 @@ dist/
 *.local
 .env
 .env.*
+
+# One-off code-generation scratch scripts (not part of the app).
+gen_*.py

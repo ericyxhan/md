@@ -21,6 +21,9 @@ PROTEIN_SUFFIXES = frozenset({".pdb", ".cif", ".mmcif"})
 LIGAND_SUFFIXES = frozenset({".pdb", ".cif", ".mmcif", ".sdf", ".mol", ".mol2"})
 ALLOWED_SUFFIXES = PROTEIN_SUFFIXES | LIGAND_SUFFIXES
 
+# Name of the cached, browser-sized preview next to an upload.
+PREVIEW_FILENAME = "preview.pdb"
+
 
 class StorageError(ValueError):
     """Raised when a stored path is invalid or escapes the data root."""
@@ -75,6 +78,18 @@ class LocalStorage:
 
     def upload_path(self, file_id: str, safe_name: str) -> Path:
         return self.absolute_key(self.upload_key(file_id, safe_name))
+
+    def upload_dir(self, file_id: str) -> Path:
+        """The directory that holds one upload and its derived views."""
+
+        validate_id(file_id, "file id")
+        return self.uploads / file_id
+
+    def preview_path(self, file_id: str) -> Path:
+        """Where the browser-sized preview of an upload is cached."""
+
+        validate_id(file_id, "file id")
+        return self.upload_dir(file_id) / PREVIEW_FILENAME
 
     def job_root(self, job_id: str) -> Path:
         validate_id(job_id, "job id")

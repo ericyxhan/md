@@ -1,0 +1,17 @@
+[Unit]
+Description=Publish the MD service through Tailscale Funnel
+Documentation=https://tailscale.com/docs/features/tailscale-funnel
+After=tailscaled.service
+Requires=tailscaled.service
+
+[Service]
+Type=simple
+# The edge port comes from the shared contract, so the funnel target cannot
+# drift away from the port Caddy actually listens on.
+EnvironmentFile=@@CONTRACT_FILE@@
+ExecStart=@@TAILSCALE_BIN@@ --socket=%h/.local/share/tailscale/tailscaled.sock funnel --https=443 http://127.0.0.1:${MD_EDGE_PORT}
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

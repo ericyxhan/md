@@ -13,7 +13,7 @@ from .errors import install_error_handlers
 from .middleware import RequestContextMiddleware
 from .observability import configure_logging
 from .ratelimit import TokenBucketRateLimiter
-from .routers import capabilities, files, health, internal, internal_prep, jobs, prep, session
+from .routers import capabilities, files, health, internal, internal_prep, jobs, prep, session, workflows
 from .security import rate_limit
 from .services.reaper import LeaseReaper
 from .settings import Settings, get_settings
@@ -94,6 +94,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     api.include_router(files.router)
     api.include_router(jobs.router)
     api.include_router(prep.router)
+    api.include_router(workflows.router)
     app.include_router(api)
     return app
 

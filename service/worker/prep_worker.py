@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -32,11 +33,217 @@ from prep_config import (
     load_config,
 )
 from prep_client import PrepAPIError, PrepClient
-from prep_ops import add_ligand, inspect_pdb, remove_ligand, select_chain
+from prep_ops import (
+    add_ligand,
+    inspect_pdb,
+    keep_selection,
+    remove_ligand,
+    remove_residues,
+    select_chain,
+)
 from prep_runner import PrepProcessHandle, PrepSubprocessRunner
 
 SLEEP_SLICE_SECONDS = 0.2
 FINISH_ATTEMPTS = 3
+
+# Packmol restarts its GENCAN counter at zero for every structure block, so
+# the log is the only reliable progress signal.  Note that packmol rewrites its
+# solution file after *every* loop, which means the presence of the output
+# file says nothing about how far the packing has actually progressed.
+_PACKMOL_LOOP_RE = re.compile(r"^\s*Starting GENCAN loop:\s*(\d+)\s*$", re.M)
+_PACKMOL_TYPE_RE = re.compile(r"^\s*Packing molecules of type:\s*(\d+)\s*$", re.M)
+
+# The packmol input file never changes while a job runs, and the log only
+# grows.  Both are parsed on every progress poll, so the results are cached
+# instead of re-reading the same bytes a couple of times a second.
+_BLOCK_BUDGET_CACHE: dict[str, tuple[tuple[int, int], list[tuple[str, int, int]]]] = {}
+_LOG_STATE_CACHE: dict[str, tuple[int, int, int, str]] = {}
+
+
+def _packmol_block_budget(inp_path: Path) -> list[tuple[str, int, int]]:
+    """Return ``(structure_name, loop_budget, molecule_count)`` per block.
+
+    The top-level ``nloop`` applies to any structure that does not declare
+    its own.  The loop budget is an upper bound: packmol stops a block early
+    once the configured tolerance is met.
+    """
+
+    try:
+        stat = inp_path.stat()
+    except OSError:
+        return []
+    key = str(inp_path)
+    signature = (stat.st_size, stat.st_mtime_ns)
+    cached = _BLOCK_BUDGET_CACHE.get(key)
+    if cached is not None and cached[0] == signature:
+        return cached[1]
+
+    try:
+        text = inp_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+
+    default_nloop = 20
+    blocks: list[tuple[str, int, int]] = []
+    current_name: str | None = None
+    current_nloop = default_nloop
+    current_count = 0
+
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("structure "):
+            current_name = line.split(None, 1)[1].strip()
+            current_nloop = default_nloop
+            current_count = 0
+            continue
+        if line == "end structure":
+            if current_name is not None:
+                blocks.append((current_name, current_nloop, current_count))
+            current_name = None
+            current_nloop = default_nloop
+            current_count = 0
+            continue
+        if line.startswith("nloop "):
+            try:
+                value = int(line.split(None, 1)[1])
+            except ValueError:
+                continue
+            if current_name is not None:
+                current_nloop = value
+            else:
+                default_nloop = value
+        elif line.startswith("number ") and current_name is not None:
+            try:
+                current_count += int(line.split(None, 1)[1])
+            except ValueError:
+                pass
+
+    _BLOCK_BUDGET_CACHE[key] = (signature, blocks)
+    return blocks
+
+
+def _packmol_log_state(log_path: Path) -> tuple[int, int]:
+    """Return ``(blocks_started, current_loop)`` for the packmol log.
+
+    Only the bytes appended since the last call are parsed; the log grows
+    while packmol runs and the progress poll happens every couple of
+    seconds.  A line that was only partly written is carried over to the
+    next call.
+    """
+
+    key = str(log_path)
+    offset, blocks_started, current_loop, pending = _LOG_STATE_CACHE.get(
+        key, (0, 0, 0, "")
+    )
+    try:
+        size = log_path.stat().st_size
+        if size < offset:
+            # The log was truncated or replaced; start over.
+            offset, blocks_started, current_loop, pending = 0, 0, 0, ""
+        if size == offset:
+            return blocks_started, current_loop
+        with log_path.open("rb") as handle:
+            handle.seek(offset)
+            chunk = handle.read()
+    except OSError:
+        return blocks_started, current_loop
+
+    text = pending + chunk.decode("utf-8", errors="replace")
+    if text.endswith("\n"):
+        pending = ""
+        lines = text.split("\n")[:-1]
+    else:
+        # The last line is only partly written; carry it over to the next
+        # call so a marker split across two reads is still matched.
+        head, _, tail = text.rpartition("\n")
+        pending = tail
+        lines = head.split("\n") if head else []
+
+    for line in lines:
+        type_match = _PACKMOL_TYPE_RE.match(line)
+        if type_match:
+            blocks_started += 1
+            current_loop = 0
+            continue
+        loop_match = _PACKMOL_LOOP_RE.match(line)
+        if loop_match:
+            current_loop = int(loop_match.group(1))
+
+    _LOG_STATE_CACHE[key] = (
+        offset + len(chunk),
+        blocks_started,
+        current_loop,
+        pending,
+    )
+    return blocks_started, current_loop
+
+
+def _packmol_progress(work_dir: Path) -> tuple[float, str]:
+    """Estimate packmol's completion from its log and input file.
+
+    Progress is measured in *molecules placed* rather than optimization
+    loops: packmol stops a block as soon as its tolerance is met, so the
+    remaining blocks usually converge in a couple of loops no matter how many
+    loops their budget allows.  Molecule count is both monotonic and a
+    meaningful sense of how much work is left.
+
+    Returns ``(percent, message)``.
+    """
+
+    log_path = work_dir / "packmol.log"
+    inp_path = work_dir / "packmol.inp"
+
+    if not log_path.is_file():
+        return 0.0, "packmol-memgen starting"
+
+    # Walk the log once.  Packmol prints "Packing molecules of type: N"
+    # before each structure block and then counts GENCAN loops inside that
+    # block.  The type header is a reliable block marker; the GENCAN counter
+    # alone is not, because a block may finish after a single loop and the
+    # counter then never leaves zero.
+    blocks_started, current_loop = _packmol_log_state(log_path)
+
+    budget = _packmol_block_budget(inp_path)
+    if not budget:
+        return 1.0, "packmol-memgen packing"
+
+    total_blocks = len(budget)
+    # The last block that started is the one currently being packed.
+    done_blocks = min(max(0, blocks_started - 1), total_blocks)
+    index = min(done_blocks, total_blocks - 1)
+
+    total_molecules = sum(count for _name, _loops, count in budget)
+    done_molecules = sum(count for _name, _loops, count in budget[:done_blocks])
+
+    current_name, current_budget, current_count = budget[index]
+
+    if total_molecules > 0:
+        placed = done_molecules
+        if blocks_started < total_blocks and current_count > 0 and current_budget > 0:
+            # Assume the block is roughly proportional to its loop progress.
+            fraction = min(1.0, current_loop / max(current_budget, 1))
+            placed += int(current_count * fraction)
+        molecule_share = placed / total_molecules
+    else:
+        molecule_share = 0.0
+
+    # Blend the two signals.  Molecule count alone barely moves while the
+    # protein and lipid blocks are packed (one protein molecule out of 80k),
+    # which reads as "stuck"; block count alone ignores that the water
+    # blocks dominate the work.  The message carries the precise detail.
+    block_share = done_blocks / total_blocks if total_blocks else 0.0
+    percent = min(
+        99.0, max(1.0, 100.0 * (0.5 * block_share + 0.5 * molecule_share))
+    )
+
+    message = (
+        f"packing {current_name} "
+        f"(block {done_blocks + 1}/{total_blocks}, loop {current_loop}"
+        f"/{current_budget})"
+    )
+    return percent, message
 
 
 def _utcnow() -> str:
@@ -101,6 +308,8 @@ class PrepWorker:
         self.sleep = sleep
         self._stopping = False
         self._active_handle: PrepProcessHandle | None = None
+        self._progress_key: tuple[Any, ...] | None = None
+        self._next_progress_send = 0.0
 
     # -- Public control ---------------------------------------------------
 
@@ -382,6 +591,32 @@ class PrepWorker:
                         f"  kept chain {chain!r} -> {intermediate.name}",
                     )
 
+                elif operation == "remove_residues":
+                    specs = step.get("residue_specs")
+                    if not specs:
+                        raise ValueError(
+                            f"step {step_index + 1}: remove_residues requires residue_specs"
+                        )
+                    intermediate = claim.work_dir / f"step_{step_index + 1}.pdb"
+                    remove_residues(current_pdb, specs, intermediate)
+                    self._job_log(
+                        claim,
+                        f"  removed {len(specs)} residue(s) -> {intermediate.name}",
+                    )
+
+                elif operation == "keep_selection":
+                    specs = step.get("residue_specs")
+                    if not specs:
+                        raise ValueError(
+                            f"step {step_index + 1}: keep_selection requires residue_specs"
+                        )
+                    intermediate = claim.work_dir / f"step_{step_index + 1}.pdb"
+                    keep_selection(current_pdb, specs, intermediate)
+                    self._job_log(
+                        claim,
+                        f"  kept {len(specs)} residue(s) -> {intermediate.name}",
+                    )
+
                 elif operation == "add_ligand":
                     ligand_ids = step.get("ligand_file_ids", [])
                     if not ligand_ids:
@@ -462,29 +697,43 @@ class PrepWorker:
             else:
                 self._job_log(claim, f"finish accepted with status completed")
                 return
-            if attempt < self.FINISH_ATTEMPTS:
+            if attempt < FINISH_ATTEMPTS:
                 self._sleep(float(attempt))
 
     def _poll_progress(
         self, claim: ClaimedPrepJob, now: float
     ) -> str | None:
-        """Report progress based on whether the output file exists yet."""
+        """Report packmol's real packing progress.
 
-        output_exists = claim.output_pdb.is_file()
-        percent = 100.0 if output_exists else 50.0
+        The output file is rewritten by packmol after every GENCAN loop, so
+        its presence cannot be used as a progress signal — doing so reported
+        "100% / finalizing" while the packing was still running.  The packmol
+        log is parsed instead.
+        """
+
+        work_dir = claim.work_dir
+        if work_dir is None:
+            percent, message = 1.0, "packmol-memgen running"
+        else:
+            percent, message = _packmol_progress(work_dir)
+
+        # Nothing changed since the last report: do not spend a database
+        # write on it.  The prep heartbeat still surfaces cancel requests,
+        # so this does not delay a cancellation.
+        key = (percent, message)
+        if key == self._progress_key and now < self._next_progress_send:
+            return None
+        self._progress_key = key
+        self._next_progress_send = now + self.config.progress_send_seconds
 
         try:
             response = self.client.progress(
                 claim.prep_job_id,
                 {
                     "run_token": claim.run_token,
-                    "phase": "minimizing" if not output_exists else "finalizing",
+                    "phase": "packing",
                     "percent": percent,
-                    "message": (
-                        "packmol-memgen running"
-                        if not output_exists
-                        else "embedding complete"
-                    ),
+                    "message": message,
                 },
             )
         except PrepAPIError as exc:
@@ -530,6 +779,21 @@ class PrepWorker:
             # The prep worker cannot register files directly; the API will
             # register them based on the output paths reported here.
             output_file_ids = [str(claim.output_pdb)]
+
+            # Packing is done; tell the UI it is finalizing the outputs
+            # before the finish call lands.
+            try:
+                self.client.progress(
+                    claim.prep_job_id,
+                    {
+                        "run_token": claim.run_token,
+                        "phase": "finalizing",
+                        "percent": 99.0,
+                        "message": "embedding complete, writing outputs",
+                    },
+                )
+            except (PrepAPIError, httpx.HTTPError, OSError):
+                pass
 
         payload: dict[str, Any] = {
             "run_token": claim.run_token,

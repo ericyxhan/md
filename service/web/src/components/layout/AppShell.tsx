@@ -8,10 +8,12 @@ import {
   FlaskConical,
   Gauge,
   Layers,
+  Layout,
   LogOut,
   Menu,
   Plus,
   Settings,
+  Shield,
   TestTubes,
   X,
 } from "lucide-react";
@@ -27,6 +29,8 @@ const primaryNav = [
 
 const futureNav = [
   { to: "/prep/system-prep", label: "System preparation", icon: Layers },
+  { to: "/prep/membrane", label: "Membrane embedding", icon: Shield },
+  { to: "/workflows", label: "Workflows", icon: Layout },
   { label: "Docking", icon: Boxes },
   { label: "Free energy", icon: Atom },
   { label: "Property prediction", icon: TestTubes },

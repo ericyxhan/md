@@ -9,6 +9,7 @@ from a caller.
 from __future__ import annotations
 
 import mimetypes
+import json
 import os
 import re
 import uuid
@@ -38,6 +39,8 @@ ARTIFACT_KINDS = frozenset(
         "checkpoint",
         "trajectory",
         "structure",
+        "view",
+        "analysis",
         "metadata",
     }
 )
@@ -113,24 +116,30 @@ def _confined_file(
     return path
 
 
-def register_artifacts(
-    session: Session,
+@dataclass(frozen=True)
+class ValidatedArtifact:
+    """A reported artifact that has been checked against the filesystem."""
+
+    item: Any
+    size_bytes: int
+    content_type: str
+
+
+def validate_artifacts(
     storage: LocalStorage,
     job: Job,
     artifacts: list[Any],
-) -> list[Artifact]:
-    """Validate and upsert artifact metadata reported by a worker.
+) -> list["ValidatedArtifact"]:
+    """Check every reported artifact against the filesystem.
 
-    The caller is responsible for the transaction.  Paths are confined to the
-    job workspace, symlinks are rejected, missing files are an error, and the
-    size recorded in the database always comes from the filesystem rather than
-    from the worker payload.
+    Paths are confined to the job workspace, symlinks are rejected, missing
+    files are an error, and the size always comes from the filesystem rather
+    than from the worker payload.  This does filesystem work only, so the
+    caller can run it before taking the write lock.
     """
 
     stage_names = {stage.name for stage in job.stages}
-    registered: list[Artifact] = []
-    seen: dict[str, Artifact] = {}
-    now = utcnow_iso()
+    validated: list[ValidatedArtifact] = []
 
     for item in artifacts:
         if item.stage_name is not None and item.stage_name not in stage_names:
@@ -157,17 +166,70 @@ def register_artifacts(
                 {"path": item.relative_path},
             )
 
-        size_bytes = path.stat().st_size
-        content_type = _content_type(item, path)
+        validated.append(
+            ValidatedArtifact(
+                item=item,
+                size_bytes=path.stat().st_size,
+                content_type=_content_type(item, path),
+            )
+        )
 
+    return validated
+
+
+def register_artifacts(
+    session: Session,
+    storage: LocalStorage,
+    job: Job,
+    artifacts: list[Any],
+) -> list[Artifact]:
+    """Validate and upsert artifact metadata reported by a worker.
+
+    The caller is responsible for the transaction.  Paths are confined to the
+    job workspace, symlinks are rejected, missing files are an error, and the
+    size recorded in the database always comes from the filesystem rather than
+    from the worker payload.
+    """
+
+    validated = validate_artifacts(storage, job, artifacts)
+    return upsert_artifacts(session, job, validated)
+
+
+def upsert_artifacts(
+    session: Session,
+    job: Job,
+    validated: list["ValidatedArtifact"],
+) -> list[Artifact]:
+    """Insert or update the artifact rows for already-validated artifacts.
+
+    The existing rows are fetched in one query instead of one query per
+    artifact, so registering a job with hundreds of artifacts does not
+    serialize hundreds of round trips through the write lock.
+    """
+
+    now = utcnow_iso()
+    registered: list[Artifact] = []
+    seen: dict[str, Artifact] = {}
+
+    existing_rows: dict[str, Artifact] = {}
+    if validated:
+        rows = session.scalars(
+            select(Artifact).where(
+                Artifact.job_id == job.id,
+                Artifact.relative_path.in_(
+                    [entry.item.relative_path for entry in validated]
+                ),
+            )
+        ).all()
+        existing_rows = {row.relative_path: row for row in rows}
+
+    for entry in validated:
+        item = entry.item
+        # A worker may report the same path twice in one request; the second
+        # report updates the row the first one created.
         existing = seen.get(item.relative_path)
         if existing is None:
-            existing = session.scalar(
-                select(Artifact).where(
-                    Artifact.job_id == job.id,
-                    Artifact.relative_path == item.relative_path,
-                )
-            )
+            existing = existing_rows.get(item.relative_path)
         if existing is None:
             record = Artifact(
                 id=str(uuid.uuid4()),
@@ -175,8 +237,8 @@ def register_artifacts(
                 stage_name=item.stage_name,
                 kind=item.kind,
                 relative_path=item.relative_path,
-                size_bytes=size_bytes,
-                content_type=content_type,
+                size_bytes=entry.size_bytes,
+                content_type=entry.content_type,
                 created_at=now,
             )
             session.add(record)
@@ -184,8 +246,8 @@ def register_artifacts(
             record = existing
             record.stage_name = item.stage_name
             record.kind = item.kind
-            record.size_bytes = size_bytes
-            record.content_type = content_type
+            record.size_bytes = entry.size_bytes
+            record.content_type = entry.content_type
             record.created_at = now
         seen[item.relative_path] = record
         registered.append(record)
@@ -230,6 +292,86 @@ def get_artifact(session: Session, job: Job, artifact_id: str) -> Artifact:
             f"Artifact {artifact_id!r} was not found",
         )
     return artifact
+
+
+# ---------------------------------------------------------------------------
+# Browser views
+# ---------------------------------------------------------------------------
+
+# Files inside outputs/views/<group>/ that make up a view, mapped to the role
+# they play. Unknown files are ignored rather than exposed to the browser.
+_VIEW_FILE_ROLES = {
+    "view.pdb": "structure",
+    "final.pdb": "structure",
+    "view.dcd": "trajectory",
+    "components.json": "manifest",
+    "frames.json": "manifest",
+}
+
+# View manifests are inlined into the views response so the browser can
+# caption a structure without a second request. Bounded to keep the response
+# small even for a pathological manifest.
+_MAX_INLINE_VIEW_MANIFEST_BYTES = 256 * 1024
+
+
+@dataclass(frozen=True)
+class ViewFiles:
+    group: str
+    structure: Artifact | None = None
+    trajectory: Artifact | None = None
+    manifest: Artifact | None = None
+
+
+@dataclass(frozen=True)
+class ViewSummary:
+    files: ViewFiles
+    manifest_data: dict[str, Any] | None = None
+
+
+def build_job_views(
+    session: Session, storage: LocalStorage, job: Job
+) -> list[ViewSummary]:
+    """Group ``view``-kind artifacts into per-group browser views.
+
+    Workers write views under ``outputs/views/<group>/`` where a group is
+    ``prepared`` or a stage name. Grouping is derived from database rows, so
+    the endpoint inherits ownership and path confinement for free; manifest
+    contents are read from the confined path and bounded.
+    """
+
+    groups: dict[str, dict[str, Artifact]] = {}
+    for artifact in list_artifacts(session, job, kind="view"):
+        parts = PurePosixPath(artifact.relative_path).parts
+        if len(parts) < 4 or parts[0] != "outputs" or parts[1] != "views":
+            continue
+        group, filename = parts[2], parts[3].lower()
+        role = _VIEW_FILE_ROLES.get(filename)
+        if role is None:
+            continue
+        slot = groups.setdefault(group, {})
+        if role not in slot:
+            slot[role] = artifact
+
+    summaries: list[ViewSummary] = []
+    for group in sorted(groups):
+        files = ViewFiles(
+            group=group,
+            structure=groups[group].get("structure"),
+            trajectory=groups[group].get("trajectory"),
+            manifest=groups[group].get("manifest"),
+        )
+        manifest_data: dict[str, Any] | None = None
+        if files.manifest is not None:
+            path = _confined_file(storage, job.id, files.manifest.relative_path)
+            if path.stat().st_size <= _MAX_INLINE_VIEW_MANIFEST_BYTES:
+                try:
+                    parsed = json.loads(path.read_text(encoding="utf-8"))
+                except (OSError, UnicodeError, ValueError):
+                    parsed = None
+                if isinstance(parsed, dict):
+                    manifest_data = parsed
+        summaries.append(ViewSummary(files=files, manifest_data=manifest_data))
+    return summaries
 
 
 def artifact_path(storage: LocalStorage, job: Job, artifact: Artifact) -> Path:

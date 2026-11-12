@@ -54,6 +54,9 @@ def test_artifact_classification() -> None:
     assert artifact_kind("outputs/stages/minimization/state.xml") == "state"
     assert artifact_kind("outputs/metadata/prepared.pdb") == "structure"
     assert artifact_kind("outputs/metadata/stage.json") == "metadata"
+    assert artifact_kind("outputs/views/prepared/view.pdb") == "view"
+    assert artifact_kind("outputs/views/prepared/manifest.json") == "view"
+    assert artifact_kind("outputs/analysis/series.json") == "analysis"
 
 
 def test_scan_artifacts_is_confined_and_skips_links(tmp_path: Path) -> None:

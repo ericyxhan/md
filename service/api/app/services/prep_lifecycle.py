@@ -27,6 +27,7 @@ from ..schemas_internal import (
 from ..settings import Settings
 from ..storage import LocalStorage
 from ..timeutils import iso_after, utcnow_iso
+from .events import add_prep_event
 
 ACTIVE_STATUSES = ("claimed", "running")
 TERMINAL_STATUSES = ("completed", "failed", "canceled")
@@ -125,6 +126,13 @@ def claim_prep(
 
         response = PrepClaimResponse(**response_kwargs)
 
+        add_prep_event(
+            session,
+            job.id,
+            "claimed",
+            f"Claimed by a prep worker ({job_type.replace('_', ' ')})",
+            {"job_type": job_type},
+        )
         session.commit()
 
     return response
@@ -147,10 +155,31 @@ def update_prep_progress(
         job.lease_expires_at = _lease_expiry(settings)
 
         if payload.phase is not None:
+            phase_changed = payload.phase != job.phase
             job.phase = payload.phase
+        else:
+            phase_changed = False
         if payload.percent is not None:
             job.progress_percent = payload.percent
+        if payload.message is not None:
+            job.progress_message = payload.message[:1000]
         job.progress_updated_at = now
+
+        # Record an event only when the phase actually changes; the worker
+        # polls every couple of seconds and one event per poll would drown
+        # the activity feed.
+        if phase_changed:
+            add_prep_event(
+                session,
+                job.id,
+                "phase_changed",
+                f"Phase changed to '{payload.phase}'",
+                {
+                    "phase": payload.phase,
+                    "percent": job.progress_percent,
+                    "message": job.progress_message,
+                },
+            )
 
         cancel_requested = bool(job.cancel_requested)
         lease_expires_at = job.lease_expires_at
@@ -196,6 +225,23 @@ def finish_prep(
             separators=(",", ":"),
         )
 
+        if payload.status == "completed":
+            add_prep_event(
+                session,
+                job.id,
+                "completed",
+                "Preparation completed",
+                {"output_file_ids": payload.output_file_ids},
+            )
+        else:
+            add_prep_event(
+                session,
+                job.id,
+                "failed",
+                payload.error_message or "Preparation failed",
+                {"error_code": payload.error_code},
+            )
+
     return PrepFinishResponse(status=payload.status)
 
 
@@ -211,18 +257,27 @@ def cancel_prep(
         if job is None:
             raise APIError(404, "prep_job_not_found", f"Prep job {prep_job_id!r} not found")
 
-        if job.status == "queued":
+        if job.status in ("pending", "queued"):
             job.status = "canceled"
             job.cancel_requested = True
             job.completed_at = now
             job.updated_at = now
             _clear_run(job)
+            add_prep_event(
+                session, job.id, "canceled", "Preparation canceled before it started"
+            )
             return job
 
         if job.status in ("claimed", "running"):
             job.status = "canceling"
             job.cancel_requested = True
             job.updated_at = now
+            add_prep_event(
+                session,
+                job.id,
+                "cancel_requested",
+                "Cancellation requested; stopping the worker",
+            )
             return job
 
         if job.status == "canceling":

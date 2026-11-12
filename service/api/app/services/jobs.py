@@ -8,12 +8,13 @@ import re
 import shutil
 import tempfile
 import uuid
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 import httpx
 from sqlalchemy import and_, or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from ..config_builder import build_config_toml
 from ..errors import APIError
@@ -27,7 +28,8 @@ from ..timeutils import utcnow_iso
 from .audit import add_audit
 from .events import add_event
 from .maintenance import check_queue_limit, ensure_disk_capacity
-from .queue import queue_position
+from .prep import prep_job_label
+from .queue import queue_position, queue_positions
 
 _PDB_ID_RE = re.compile(r"^[0-9A-Za-z]{4}$")
 _RCSB_URL = "https://files.rcsb.org/download/{pdb_id}.pdb"
@@ -377,13 +379,34 @@ def create_job(
 # ---------------------------------------------------------------------------
 
 
-def job_to_dict(session: Session, job: Job) -> dict[str, Any]:
+def job_to_dict(
+    session: Session,
+    job: Job,
+    *,
+    queue_positions: Mapping[str, int] | None = None,
+) -> dict[str, Any]:
+    """Serialize one job.
+
+    ``queue_positions`` is the batched queue ranking produced by
+    :func:`~app.services.queue.queue_positions`.  Pass it when serializing a
+    list so the queue position does not cost one query per job; leave it out
+    for a single job.
+    """
+
     error = None
     if job.error_code is not None:
         error = {
             "code": job.error_code,
             "message": job.error_message or job.error_code,
         }
+    if queue_positions is None:
+        position = queue_position(session, job)
+    else:
+        position = queue_positions.get(job.id)
+        if position is None and job.status == "queued":
+            # A queued job missing from the batched ranking has no
+            # ``queued_at``; fall back to the exact single-job calculation.
+            position = queue_position(session, job)
     return {
         "id": job.id,
         "name": job.name,
@@ -398,7 +421,7 @@ def job_to_dict(session: Session, job: Job) -> dict[str, Any]:
             "percent": job.progress_percent,
             "updated_at": job.progress_updated_at,
         },
-        "queue_position": queue_position(session, job),
+        "queue_position": position,
         "stages": [
             {
                 "name": stage.name,
@@ -458,7 +481,12 @@ def list_jobs(
     if limit < 1 or limit > 100:
         raise APIError(400, "invalid_limit", "limit must be between 1 and 100")
 
-    statement = select(Job).where(Job.owner_id == owner_id)
+    # ``selectinload`` loads the stages for the whole page in one extra
+    # query.  Without it, serializing a page of jobs lazy-loads the stages
+    # one job at a time.
+    statement = select(Job).options(selectinload(Job.stages)).where(
+        Job.owner_id == owner_id
+    )
     if status is not None:
         statement = statement.where(Job.status == status)
     if cursor is not None:
@@ -501,6 +529,105 @@ def list_events(
         for event in events
     ]
 
+
+def list_events_across_jobs(
+    session: Session,
+    owner_id: str,
+    *,
+    limit: int,
+    cursor: str | None,
+) -> tuple[list[dict[str, Any]], str | None]:
+    """List recent events across all jobs and prep jobs owned by ``owner_id``.
+
+    MD simulation jobs and system-preparation jobs keep separate event logs
+    (``job_events`` is keyed by MD job id, ``prep_events`` by prep job id),
+    but the user-facing activity feed shows both.  Events are ordered by
+    creation time, newest first.
+    """
+    from ..models import Job, JobEvent, PrepEvent, PrepJob
+
+    # Both statements are bounded and ordered in SQL.  Fetching the whole
+    # event history and truncating in Python made the feed cost grow with
+    # the number of events ever recorded for the owner.
+    job_statement = (
+        select(JobEvent, Job)
+        .join(Job, JobEvent.job_id == Job.id)
+        .where(Job.owner_id == owner_id)
+        .order_by(JobEvent.created_at.desc(), JobEvent.id.desc())
+        .limit(limit + 1)
+    )
+    prep_statement = (
+        select(PrepEvent, PrepJob)
+        .join(PrepJob, PrepEvent.prep_job_id == PrepJob.id)
+        .where(PrepJob.owner_id == owner_id)
+        .order_by(PrepEvent.created_at.desc(), PrepEvent.id.desc())
+        .limit(limit + 1)
+    )
+
+    if cursor is not None:
+        try:
+            created_at, event_id = cursor.split("|", 1)
+            job_statement = job_statement.where(
+                or_(
+                    JobEvent.created_at < created_at,
+                    and_(
+                        JobEvent.created_at == created_at,
+                        JobEvent.id < int(event_id),
+                    ),
+                )
+            )
+            prep_statement = prep_statement.where(
+                or_(
+                    PrepEvent.created_at < created_at,
+                    and_(
+                        PrepEvent.created_at == created_at,
+                        PrepEvent.id < int(event_id),
+                    ),
+                )
+            )
+        except (ValueError, UnicodeError):
+            raise APIError(400, "invalid_cursor", "Invalid pagination cursor")
+
+    rows: list[dict[str, Any]] = []
+    for event, job in session.execute(job_statement).all():
+        rows.append(
+            {
+                "id": event.id,
+                "created_at": event.created_at,
+                "source": "job",
+                "job_id": event.job_id,
+                "job_name": job.name,
+                "job_status": job.status,
+                "prep_type": None,
+                "type": event.type,
+                "message": event.message,
+                "data": json.loads(event.data_json) if event.data_json else None,
+            }
+        )
+    for event, prep_job in session.execute(prep_statement).all():
+        rows.append(
+            {
+                "id": event.id,
+                "created_at": event.created_at,
+                "source": "prep",
+                "job_id": event.prep_job_id,
+                "job_name": prep_job_label(prep_job),
+                "job_status": prep_job.status,
+                "prep_type": prep_job.type,
+                "type": event.type,
+                "message": event.message,
+                "data": json.loads(event.data_json) if event.data_json else None,
+            }
+        )
+
+    rows.sort(key=lambda row: (row["created_at"], row["id"]), reverse=True)
+    next_cursor = None
+    if len(rows) > limit:
+        rows = rows[:limit]
+        last = rows[-1]
+        next_cursor = f"{last['created_at']}|{last['id']}"
+
+    return rows, next_cursor
 
 # ---------------------------------------------------------------------------
 # Dry validation

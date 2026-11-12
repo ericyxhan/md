@@ -3,6 +3,7 @@ import {
   Activity,
   AlertTriangle,
   ArrowRight,
+  Bell,
   CheckCircle2,
   Clock3,
   Cpu,
@@ -12,7 +13,7 @@ import {
   Rocket,
 } from "lucide-react";
 import { useAuth } from "../auth/AuthProvider";
-import { useCapabilities, useJobs } from "../lib/queries";
+import { useCapabilities, useEvents, useJobs, usePrepJobs } from "../lib/queries";
 import { formatCompact, formatRelative, isActive } from "../lib/utils";
 import { PageHeader } from "../components/layout/PageHeader";
 import { Button } from "../components/ui/Button";
@@ -20,6 +21,74 @@ import { Card, CardHeader } from "../components/ui/Card";
 import { EmptyState, PageLoader } from "../components/ui/EmptyState";
 import { StatCard } from "../components/jobs/StatCard";
 import { ActiveJobCard, JobRow } from "../components/jobs/JobCards";
+import { NotificationFeed } from "../components/jobs/NotificationFeed";
+import { StatusBadge } from "../components/ui/Badge";
+import { ProgressBar } from "../components/ui/Progress";
+import type { PrepJobStatus } from "../lib/types";
+import { cn } from "../lib/utils";
+
+const PREP_LABELS: Record<string, string> = {
+  membrane_embed: "Membrane embedding",
+  system_prep: "System preparation",
+};
+
+/**
+ * One system-preparation job (membrane embedding or structure editing) in
+ * the overview list.
+ */
+function PrepJobRow({ job }: { job: PrepJobStatus }) {
+  const navigate = useNavigate();
+  const base =
+    job.type === "membrane_embed" ? "/prep/membrane" : "/prep/system-prep";
+  const active =
+    job.status === "queued" ||
+    job.status === "claimed" ||
+    job.status === "running";
+  const percent = job.progress_percent;
+
+  return (
+    <button
+      type="button"
+      onClick={() => navigate(`${base}/${job.id}`)}
+      className="group grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-2 px-5 py-3.5 text-left transition hover:bg-surface-muted sm:grid-cols-[minmax(0,2fr)_minmax(0,1.3fr)_120px_92px]"
+    >
+      <div className="min-w-0">
+        <p className="truncate text-[13.5px] font-medium text-ink group-hover:text-brand-800">
+          {PREP_LABELS[job.type] ?? job.type}
+        </p>
+        <p className="mt-0.5 truncate text-[11px] text-faint">
+          {job.progress_message ??
+            job.error ??
+            job.phase ??
+            `created ${formatRelative(job.created_at)}`}
+        </p>
+      </div>
+
+      <div className="min-w-0">
+        {active && percent != null ? (
+          <div className="flex items-center gap-2">
+            <ProgressBar value={percent} className="h-1.5 flex-1" animated />
+            <span className="shrink-0 text-[11px] tabular-nums text-muted">
+              {Math.round(percent)}%
+            </span>
+          </div>
+        ) : (
+          <span className="text-[11px] text-faint">
+            {formatRelative(job.created_at)}
+          </span>
+        )}
+      </div>
+
+      <StatusBadge status={job.status} className="justify-self-start" />
+
+      <span className="text-[11px] text-faint">
+        {job.output_file_ids.length > 0
+          ? `${job.output_file_ids.length} output${job.output_file_ids.length !== 1 ? "s" : ""}`
+          : "—"}
+      </span>
+    </button>
+  );
+}
 
 function greeting(): string {
   const hour = new Date().getHours();
@@ -47,6 +116,8 @@ export function DashboardPage() {
   const navigate = useNavigate();
   const jobs = useJobs(undefined, 50);
   const capabilities = useCapabilities();
+  const events = useEvents(30);
+  const prepJobs = usePrepJobs();
 
   if (jobs.isLoading) {
     return (
@@ -209,6 +280,31 @@ export function DashboardPage() {
         </section>
       ) : null}
 
+      {prepJobs.data && prepJobs.data.length > 0 ? (
+        <section className="mt-7">
+          <Card className="overflow-hidden">
+            <CardHeader
+              title="System preparation"
+              description="Membrane embedding and structure editing jobs across this workspace."
+              action={
+                <Link
+                  to="/prep/system-prep"
+                  className="inline-flex items-center gap-1 text-[12px] font-medium text-brand-700 hover:text-brand-800"
+                >
+                  New preparation
+                  <ArrowRight className="size-3" />
+                </Link>
+              }
+            />
+            <div className="divide-y divide-line">
+              {prepJobs.data.slice(0, 6).map((job) => (
+                <PrepJobRow key={job.id} job={job} />
+              ))}
+            </div>
+          </Card>
+        </section>
+      ) : null}
+
       <section className="mt-7">
         <Card className="overflow-hidden">
           <CardHeader
@@ -245,6 +341,42 @@ export function DashboardPage() {
                 <JobRow key={job.id} job={job} />
               ))}
             </div>
+          )}
+        </Card>
+      </section>
+
+      <section className="mt-7">
+        <Card className="overflow-hidden">
+          <CardHeader
+            title="Activity"
+            description="Everything that has happened across your simulations, newest first."
+            action={
+              <span className="inline-flex items-center gap-1 text-[11.5px] text-faint">
+                <Bell className="size-3.5" />
+                {events.data?.length ?? 0} recent
+              </span>
+            }
+          />
+          {events.isLoading ? (
+            <div className="divide-y divide-line">
+              {[0, 1, 2, 3, 4].map((item) => (
+                <div key={item} className="animate-pulse px-5 py-3.5">
+                  <div className="h-3 w-64 rounded bg-line" />
+                  <div className="mt-2 h-2.5 w-40 rounded bg-line" />
+                </div>
+              ))}
+            </div>
+          ) : events.isError ? (
+            <p className="px-5 py-6 text-[12px] text-rose-600">
+              {events.error instanceof Error
+                ? events.error.message
+                : "Could not load recent activity."}
+            </p>
+          ) : (
+            <NotificationFeed
+              events={events.data ?? []}
+              emptyLabel="No activity yet. Launch a simulation and its progress will appear here."
+            />
           )}
         </Card>
       </section>

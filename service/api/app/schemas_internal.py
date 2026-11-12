@@ -23,6 +23,8 @@ ArtifactKind = Literal[
     "checkpoint",
     "trajectory",
     "structure",
+    "view",
+    "analysis",
     "metadata",
 ]
 PrepStatus = Literal["queued", "claimed", "running", "completed", "failed", "canceled"]

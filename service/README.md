@@ -106,10 +106,203 @@ single-page app; `/internal/*` always returns 404. The API and web containers
 are not published on host ports. For local API development without Caddy, run
 Uvicorn and Vite directly as shown below.
 
-Data lives in the host bind mounts (`HOST_DB_DIR` and `HOST_DATA_DIR`), not in
-named volumes. `docker compose down` therefore keeps SQLite and job files;
-`docker compose down -v` only removes the Caddy volumes. Back up the database
-with SQLite's `.backup` rather than copying a live `app.db`.
+## Shared contract
+
+Several values are needed by more than one file: the port the API listens on,
+the port the edge publishes, the account the containers run as, the paths they
+mount, and the route prefixes. When those values are written out separately in
+compose.yml, the Caddyfile, the Dockerfiles, the nginx config, the systemd
+units and the frontend, a change to one of them silently desynchronises the
+others. That is how the edge ended up proxying to a port nobody was listening
+on, and how the prep worker ended up writing files the API could not read.
+
+`contract.env` owns those values. Everything else refers to them:
+
+| File | How it refers to the contract |
+|---|---|
+| `compose.yml` | `${MD_API_PORT:-8000}` and friends, plus build arguments |
+| `Caddyfile` | `{$MD_API_PORT:8000}` placeholders |
+| `api/Dockerfile` | `ARG MD_SERVICE_UID=10001`, `USER ${MD_SERVICE_UID}:${MD_SERVICE_GID}` |
+| `worker/prep_worker.Dockerfile` | the same account, so the two can read each other's files |
+| `web/nginx.conf` | `listen ${MD_WEB_PORT};`, substituted by nginx's entrypoint |
+| `scripts/*.service` | `EnvironmentFile=` and `${MD_EDGE_PORT}` |
+| `scripts/*.sh` | sourced from `contract.env` by `00-env.sh` |
+
+The file holds no secrets. Deployment secrets stay in `.env`, which is layered
+on top of it, so a secret always wins over a contract default.
+
+### Checking it
+
+```bash
+python3 service/scripts/check-contract.py
+```
+
+It reads every file above and fails when a copy disagrees with the contract.
+A value may be written literally or as a reference; a literal is checked
+against the contract, and a reference's fallback has to match it too, so a
+build that runs without the contract file still produces the same
+deployment.
+
+The same check runs as part of the test suite
+(`tests/test_service_contract.py`), which also confirms that the checker
+still detects a value that has drifted in either direction.
+
+### Preflight
+
+```bash
+cd service
+./scripts/preflight.sh
+```
+
+It runs the contract check, verifies the host prerequisites (the env file, the
+required secrets, a configured browser login, the database and data
+directories, free disk space, and that the edge port is still bound to
+loopback), and then checks the running stack and the public tunnel.
+`launch-all.sh` runs it first and refuses to start a deployment that fails.
+
+### Changing a value
+
+1. Edit `contract.env`.
+2. Run `python3 service/scripts/check-contract.py`. It lists every copy that
+   still holds the old value.
+3. Update the copies it names, then run it again until it passes.
+4. Rebuild the affected images and restart the stack.
+
+## Public deployment
+
+The stack is published to the internet through a Tailscale Funnel tunnel. The
+funnel terminates TLS and forwards to Caddy, which listens on plain HTTP on
+the loopback interface only. The SPA and the API therefore share one origin,
+so the browser session cookie, the CSRF token, artifact downloads and the
+event stream all work without any cross-origin handling.
+
+```
+browser ──HTTPS──► Tailscale Funnel ──► Caddy (127.0.0.1:8080) ──► api:8000
+                                              └──► web:80 (SPA)
+```
+
+Nothing listens on a public port: the funnel connects outward, so the host
+needs no public IP and no router configuration. That also means the service
+is reachable from a home connection behind NAT.
+
+Funnel is the only free ingress that gives a stable hostname, working
+server-sent events, and a valid certificate without a domain. Cloudflare
+quick tunnels change hostname on every restart and explicitly do not support
+SSE; ngrok's free tier caps data transfer at 1 GB per month, which a single
+trajectory would exhaust.
+
+### One-time setup
+
+```bash
+cd service
+./scripts/setup-public-access.sh
+```
+
+The script installs Tailscale into `~/.local/share/tailscale-pkg/` and runs it
+in **userspace mode**, so it needs no root. It then registers two user
+systemd units in `~/.config/systemd/user/`:
+
+| Unit | Role |
+|---|---|
+| `tailscaled.service` | the Tailscale daemon |
+| `md-funnel.service` | publishes `http://127.0.0.1:8080` over the funnel |
+| `md-backup.timer` | nightly backup of the database and job data |
+
+`loginctl enable-linger` keeps both running after logout and reboot.
+
+Two steps need a browser, because they authenticate as your account:
+
+1. `tailscale --socket=$HOME/.local/share/tailscale/tailscaled.sock up
+   --accept-dns=false --ssh=false --hostname=$(hostname -s)` prints a login
+   URL. Sign in and the node joins your tailnet.
+2. The funnel command prints a second URL to enable Funnel on the tailnet.
+   That adds the `funnel` node attribute to the tailnet access controls:
+
+   ```json
+   {
+     "nodeAttrs": [
+       { "target": ["autogroup:member"], "attr": ["funnel"] }
+     ]
+   }
+   ```
+
+The public hostname is printed by `journalctl --user -u md-funnel.service` and
+looks like `https://<machine>.<tailnet>.ts.net`. It does not change across
+restarts.
+
+Kernel mode is faster than userspace mode but requires `CAP_NET_ADMIN`; if
+you install the official package with root you can drop `--tun=userspace-networking`
+from `tailscaled.service`.
+
+### Verify the deployment
+
+```bash
+# The tunnel reaches the service.
+curl -s -o /dev/null -w "%{http_code}\n" https://<machine>.<tailnet>.ts.net/healthz
+
+# Worker routes are not reachable from the internet (404, not 401).
+curl -s -o /dev/null -w "%{http_code}\n" https://<machine>.<tailnet>.ts.net/internal/v1/jobs/claim
+
+# The client address reaches the API rather than the local proxy.
+docker compose --env-file .env logs api | grep request.completed | tail -1
+```
+
+The last command must show a public IP address in `client_ip`. If it shows
+`172.19.0.1`, the tunnel did not forward the client address and the per-IP
+login limiter is collapsing into a single bucket.
+
+### Client address handling
+
+Caddy discards forwarding headers it cannot vouch for, so it is configured
+with `trusted_proxies` for the loopback and private ranges and rewrites
+`X-Forwarded-For` to the single address it resolved. The API reads that
+header (`TRUST_FORWARDED_FOR=true`, on by default) and uses it for the
+per-IP rate limiter and the audit trail. Set `TRUST_FORWARDED_FOR=false` when
+running the API directly, without a proxy in front.
+
+### Backups
+
+```bash
+cd service
+./scripts/backup.sh               # writes to BACKUP_DIR from .env
+```
+
+The database is copied with SQLite's online backup API, which is safe against
+a live WAL database. The data root is copied with a plain `tar`. Every
+container that writes into it runs as the contract service account, so the
+whole tree is readable and the copy is complete without sudo; if it is not,
+the script falls back to copying through a container, which reads as root.
+
+It is scheduled as a user systemd timer, so it runs unattended:
+
+```bash
+systemctl --user list-timers md-backup.timer
+systemctl --user start md-backup.service     # run one now
+```
+
+The timer fires just after 03:00 with a randomised delay, and catches up on
+a missed run after a reboot.
+
+### Keeping it running
+
+- `tailscaled.service` and `md-funnel.service` are user systemd units, enabled
+  with linger so they survive logout and reboot.
+- The containers use `restart: unless-stopped`.
+- The host must stay powered on and awake. Disable sleep and hibernation.
+- Funnel traffic is bandwidth-limited by Tailscale and shares relay capacity.
+  Interactive viewing uses the derived solute-focused views, which are small;
+  downloading a raw trajectory is the slow path.
+
+### Deploying an update
+
+```bash
+cd service
+./scripts/stop-all.sh
+./scripts/launch-all.sh
+```
+
+The tunnel is unaffected by a stack restart. The SPA is rebuilt by
+`launch-web.sh`, so a frontend change needs that step.
 
 ## Local development
 
@@ -334,6 +527,10 @@ artifact/log downloads, SSE resume and terminal closure, queue and disk
 admission limits, retention cleanup, request IDs, rate limiting, the audit
 trail, docs policy, and a SQLite backup/restore round trip.
 
+It also includes the contract tests, which run `scripts/check-contract.py`
+over the whole service tree and confirm that it detects a deliberately
+drifted value.
+
 The worker suite uses a fake API client and a fake process handle. It checks the
 fixed command, restart flags, stale-manifest clearing before a retry,
 stdout/stderr capture, process-group signaling, progress parsing and throttling,
@@ -383,6 +580,16 @@ SQLite and job artifacts are separate backup units. Do not copy a live
 `app.db` by itself; use SQLite's backup API or Litestream so WAL state is
 included.
 
+`scripts/backup.sh` does both of steps 2 and 3, and is scheduled by the
+`md-backup.timer` user unit. Run it by hand with:
+
+```bash
+cd service
+./scripts/backup.sh
+```
+
+To do it by hand instead:
+
 1. Quiesce writers: stop the worker, then the API (`docker compose stop worker api`).
 2. Back up the database:
 
@@ -421,25 +628,38 @@ and confirms the restored artifact files are readable.
 
 - Authentication uses constant-time comparisons. The public bearer token and
   the worker token are separate, and Caddy answers `/internal/*` with 404.
+- The browser password is stored only as a scrypt hash. `set-lab-password.sh`
+  writes the hash and removes the plaintext from `.env`; the hash is
+  single-quoted so compose does not interpolate its `$` separators.
 - Request models use `extra="forbid"`. The public API accepts no raw TOML,
   filesystem path, executable, force-field path, platform, or platform
   property.
 - The worker command is fixed and restart flags come from an enum. The API
   never imports OpenMM or creates a GPU context.
 - Uploads stream to disk, hash while reading, enforce per-file and per-job
-  limits, and accept only the documented suffixes.
+  limits, and accept only the documented suffixes. They also count the atoms
+  in the structure and reject one over `MAX_UPLOAD_ATOMS`, because the
+  simulation cost grows with the atom count and a byte limit does not bound
+  the GPU time.
 - PDB mode permits only a four-character ID and one fixed RCSB URL; it can be
   disabled with `ALLOW_PDB_DOWNLOAD=false`.
 - Every file, job, artifact, log, and event stream is checked against the
   caller. Artifact and log downloads resolve by ID or fixed name only.
 - Path handling rejects absolute paths, `.` and `..`, NUL bytes, escapes, and
   symlinks at every component.
-- The API runs as UID 10001. Compose mounts only `/db` and `/data`; there is no
-  Docker socket. The worker mounts only `/data`.
+- Every container that touches user-supplied structures runs unprivileged:
+  the API, the worker and the prep worker all run as the contract service
+  account with `cap_drop: [ALL]` and `no-new-privileges`. The API also has a
+  read-only root filesystem. The worker keeps network access because it polls
+  the API for jobs; the simulation itself reaches nothing.
+- Compose mounts only `/db` and `/data`; there is no Docker socket. The
+  worker mounts only `/data`.
 - CORS is limited to `CORS_ORIGINS`, docs can be disabled with
   `DOCS_ENABLED=false`, and queue/rate limits bound public work.
 - Request IDs and structured logs avoid tokens, query strings, and bodies.
   Accepted mutations append to `audit_events`.
+- No `GET` handler changes state. The ones that write do so only to
+  regenerate an idempotent derived cache.
 
 ## Configuration policy
 

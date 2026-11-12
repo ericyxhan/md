@@ -1,16 +1,19 @@
 import {
   useCallback,
+  useEffect,
   useState,
   type ChangeEvent,
 } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircle,
   Download,
   FileUp,
   Globe2,
+  Layers,
   Loader2,
+  Plus,
   RefreshCw,
   RotateCcw,
 } from "lucide-react";
@@ -22,6 +25,9 @@ import type {
 } from "../../lib/types";
 import {
   cancelPrepJob,
+  createWorkflow,
+  fetchPdb,
+  getFile,
   getPrepJob,
   listPrepJobs,
   requestMembraneEmbed,
@@ -30,12 +36,13 @@ import { usePrepJob, usePrepJobs, useCapabilities } from "../../lib/queries";
 import { useToast } from "../../components/ui/Toast";
 import { PageHeader } from "../../components/layout/PageHeader";
 import { Button } from "../../components/ui/Button";
-import { Card, CardBody } from "../../components/ui/Card";
+import { Card, CardBody, CardHeader } from "../../components/ui/Card";
 import { EmptyState, PageLoader } from "../../components/ui/EmptyState";
 import { FileDropzone } from "../../components/upload/FileDropzone";
 import { Field, Select, SuffixInput, Toggle } from "../../components/ui/Form";
 import { ProgressBar } from "../../components/ui/Progress";
-import { cn } from "../../lib/utils";
+import { PrepJobRow } from "../../components/jobs/PrepJobCards";
+import { cn, isPrepActive } from "../../lib/utils";
 
 const LIPIDS: Array<{ value: LipidType; label: string }> = [
   { value: "POPC", label: "POPC (1-palmitoyl-2-oleoyl-sn-glycero-3-phosphocholine)" },
@@ -54,48 +61,86 @@ const ORIENTATIONS: Array<{ value: string | null; label: string }> = [
 
 export default function MembraneEmbedPage() {
   const { prepJobId } = useParams<{ prepJobId?: string }>();
+
+  // The view and the form are separate components on purpose.  Handling
+  // both in one component with an early return changes the number of hooks
+  // React sees between renders, which violates the Rules of Hooks: React
+  // throws "Rendered more hooks than during the previous render" and, with
+  // no error boundary above it, the whole page goes blank until a refresh.
+  if (prepJobId) {
+    return <MembraneEmbedJobView prepJobId={prepJobId} />;
+  }
+  return <MembraneEmbedForm />;
+}
+
+/**
+ * Shows a claimed or finished membrane-embedding job.
+ */
+function MembraneEmbedJobView({ prepJobId }: { prepJobId: string }) {
   const navigate = useNavigate();
   const { push } = useToast();
   const queryClient = useQueryClient();
 
-  // ========================================================================
-  // Viewing an existing prep job
-  // ========================================================================
+  const createWorkflowMutation = useMutation({
+    mutationFn: (payload: { name: string; source_file_id: string; source_type: string }) =>
+      createWorkflow(payload),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["workflows"] });
+      push({
+        title: "Workflow created",
+        description:
+          "'" +
+          data.name +
+          "' is now a base system. Launch variant simulations from the Workflows page.",
+        tone: "info",
+      });
+      navigate("/workflows/" + data.id);
+    },
+    onError: (cause: unknown) => {
+      push({
+        title: "Workflow creation failed",
+        description:
+          cause instanceof Error ? cause.message : "Could not create the workflow.",
+        tone: "error",
+      });
+    },
+  });
 
-  if (prepJobId) {
-    const { data: prepJob, isLoading: isLoadingJob, refetch } = usePrepJob(
-      prepJobId
+  const { data: prepJob, isLoading: isLoadingJob, refetch } = usePrepJob(
+    prepJobId
+  );
+
+  if (isLoadingJob) return <PageLoader label="Loading preparation job" />;
+  if (!prepJob) {
+    return (
+      <div className="mx-auto max-w-[760px]">
+        <EmptyState
+          icon={<AlertCircle className="size-6" />}
+          title="Preparation job not found"
+          description="That prep job does not exist or you do not have access to it."
+          action={
+            <Button onClick={() => navigate("/prep/membrane")}>
+              Create a new embedding
+            </Button>
+          }
+        />
+      </div>
     );
+  }
 
-    if (isLoadingJob) return <PageLoader label="Loading preparation job" />;
-    if (!prepJob) {
-      return (
-        <div className="mx-auto w-full max-w-[700px] px-4 py-6 sm:px-6 lg:px-8">
-          <EmptyState
-            icon={<AlertCircle className="size-6" />}
-            title="Preparation job not found"
-            description="That prep job does not exist or you do not have access to it."
-            action={
-              <Button onClick={() => navigate("/prep/membrane")}>
-                Create a new embedding
-              </Button>
-            }
-          />
-        </div>
-      );
-    }
-
+  {
     const terminal =
       prepJob.status === "completed" ||
       prepJob.status === "failed" ||
       prepJob.status === "canceled";
-    const active = prepJob.status === "queued" || prepJob.status === "running";
+    const active = isPrepActive(prepJob.status);
     const canDownload =
       prepJob.status === "completed" && prepJob.output_file_ids.length > 0;
 
     return (
-      <div className="mx-auto w-full max-w-[700px] px-4 py-6 sm:px-6 lg:px-8">
+      <div>
         <PageHeader
+          className="max-w-[760px]"
           title="Membrane embedding"
           description={
             prepJob.status === "completed"
@@ -108,7 +153,7 @@ export default function MembraneEmbedPage() {
           }
         />
 
-        <Card className="mb-6">
+        <Card className="mb-6 max-w-[760px]">
           <CardBody className="p-6">
             <div className="space-y-5">
               <div className="flex items-start justify-between gap-2">
@@ -139,19 +184,31 @@ export default function MembraneEmbedPage() {
                 </div>
               )}
 
-              {active && prepJob.progress_percent != null && (
+              {active && (
                 <div className="space-y-2">
                   <div className="flex items-start justify-between gap-2">
                     <span className="text-[13px] text-ink-soft">Progress</span>
                     <span className="text-[13px] font-medium text-ink">
-                      {prepJob.progress_percent}%{" "}
-                      {prepJob.progress_percent === 100 ? "(finalizing…)" : ""}
+                      {prepJob.progress_percent != null
+                        ? `${Math.round(prepJob.progress_percent)}%`
+                        : "Working…"}
                     </span>
                   </div>
                   <ProgressBar
-                    value={prepJob.progress_percent ?? 0}
+                    value={prepJob.progress_percent ?? 100}
                     className="h-3"
+                    animated={prepJob.progress_percent == null}
                   />
+                  {prepJob.progress_message ? (
+                    <p className="text-[11.5px] leading-relaxed text-muted">
+                      {prepJob.progress_message}
+                    </p>
+                  ) : null}
+                  {prepJob.progress_updated_at ? (
+                    <p className="text-[10.5px] text-faint">
+                      updated {prepJob.progress_updated_at}
+                    </p>
+                  ) : null}
                 </div>
               )}
 
@@ -212,6 +269,27 @@ export default function MembraneEmbedPage() {
                     disabled={!prepJob.output_file_ids[0]}
                   >
                     Use embedded system in simulation
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      createWorkflowMutation.mutate({
+                        name:
+                          "Workflow · " +
+                          prepJob.type +
+                          " · " +
+                          new Date().toLocaleDateString(),
+                        source_file_id: prepJob.output_file_ids[0]!,
+                        source_type: "membrane_embed",
+                      });
+                    }}
+                    className="w-full sm:w-auto mt-2"
+                    disabled={
+                      !prepJob.output_file_ids[0] ||
+                      createWorkflowMutation.isPending
+                    }
+                  >
+                    {createWorkflowMutation.isPending ? "Creating…" : "Save as workflow base system"}
                   </Button>
                 </div>
               )}
@@ -283,11 +361,19 @@ export default function MembraneEmbedPage() {
     );
   }
 
-  // ========================================================================
-  // Creating a new prep job
-  // ====================================================================
+}
+
+/**
+ * The membrane-embedding request form.
+ */
+function MembraneEmbedForm() {
+  const navigate = useNavigate();
+  const { push } = useToast();
+  const queryClient = useQueryClient();
+
 
   const [proteinFile, setProteinFile] = useState<FileOut | null>(null);
+  const [pdbId, setPdbId] = useState("");
   const [lipid, setLipid] = useState<LipidType>("POPC");
   const [boxPadding, setBoxPadding] = useState(1.5);
   const [orientation, setOrientation] = useState<string | null>(null);
@@ -296,11 +382,34 @@ export default function MembraneEmbedPage() {
     null
   );
 
+  const [searchParams] = useSearchParams();
+  const prepFileId = searchParams.get("prepFileId");
+
+  // The history is the page's main content; the request form opens on demand
+  // (or immediately when arriving from a deep link that carries a file).
+  const [formOpen, setFormOpen] = useState(Boolean(prepFileId));
+
   const { data: capabilities, refetch: refetchCapabilities } =
     useCapabilities();
 
   const prepEnabled =
     capabilities?.prep_workflows?.membrane_embed?.enabled ?? false;
+
+  // If arriving from a system-prep job, auto-select its output file as the
+  // protein to embed. This guides users toward the correct order: build the
+  // complete complex first, then embed it in a membrane.
+  useEffect(() => {
+    if (!prepFileId || proteinFile) return;
+    const fetchFile = async () => {
+      try {
+        const file = await getFile(prepFileId);
+        setProteinFile(file);
+      } catch {
+        // Ignore; the file may not exist or may not be accessible.
+      }
+    };
+    void fetchFile();
+  }, [prepFileId, proteinFile]);
 
   const embedMutation = useMutation({
     mutationFn: requestMembraneEmbed,
@@ -316,6 +425,26 @@ export default function MembraneEmbedPage() {
   });
 
   const isEmbedding = embedMutation.isPending;
+
+  const fetchPdbMutation = useMutation({
+    mutationFn: async (pdbId: string) => fetchPdb(pdbId),
+    onSuccess: (data) => {
+      setPdbId("");
+      setProteinFile({
+        id: data.file_id,
+        name: pdbId.toUpperCase() + ".pdb",
+        size_bytes: 0,
+        sha256: "",
+        content_type: "chemical/x-pdb",
+        created_at: "",
+      });
+    },
+    onError: (cause: unknown) => {
+      const message =
+        cause instanceof Error ? cause.message : "Failed to fetch PDB";
+      push({ title: "Fetch failed", description: message, tone: "error" });
+    },
+  });
 
   const canSubmit =
     !!proteinFile &&
@@ -336,12 +465,24 @@ export default function MembraneEmbedPage() {
   };
 
   const { data: prepJobs } = usePrepJobs();
+  const embeddings = (prepJobs ?? []).filter(
+    (job) => job.type === "membrane_embed",
+  );
 
   return (
-    <div className="mx-auto w-full max-w-[700px] px-4 py-6 sm:px-6 lg:px-8">
+    <div>
       <PageHeader
         title="Membrane embedding"
         description="Embed a protein structure in a lipid bilayer for MD simulation"
+        actions={
+          <Button
+            variant="primary"
+            leadingIcon={<Plus className="size-4" />}
+            onClick={() => setFormOpen(true)}
+          >
+            New embedding
+          </Button>
+        }
       />
 
       {!capabilities && (
@@ -383,8 +524,39 @@ export default function MembraneEmbedPage() {
       )}
 
       {capabilities?.prep_workflows?.membrane_embed?.enabled && (
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <Card>
+        <Card className="mb-6 max-w-[760px] border-line bg-brand-50/10">
+          <CardBody className="p-5">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="mt-0.5 size-5 text-brand-700" />
+              <div>
+                <p className="text-[13px] font-semibold text-ink">
+                  Build your complex first
+                </p>
+                <p className="text-[12.5px] text-muted">
+                  Membrane embedding sizes the box and solvation around the
+                  input structure. If you plan to add ligands or edit the
+                  complex afterward, do that in{" "}
+                  <button
+                    onClick={() => navigate("/prep/system-prep")}
+                    className="text-brand-700 underline hover:text-brand-800"
+                  >
+                    system preparation
+                  </button>
+                  first, then embed the complete complex here. Embedding a lone
+                  protein and adding ligands later can cause steric clashes
+                  because the box is already fixed.
+                </p>
+              </div>
+            </div>
+          </CardBody>
+        </Card>
+      )}
+
+      {capabilities?.prep_workflows?.membrane_embed?.enabled && (
+        <>
+          {formOpen && (
+            <form onSubmit={handleSubmit} className="space-y-6">
+          <Card className="max-w-[760px]">
             <CardBody className="p-6">
               <div className="space-y-5">
                 <div>
@@ -398,9 +570,64 @@ export default function MembraneEmbedPage() {
                     title="Upload a protein structure"
                     hint="PDB or mmCIF. This will be embedded into the selected lipid bilayer."
                     onUploaded={setProteinFile}
-                    onRemove={() => setProteinFile(null)}
+                    onRemove={() => {
+                      setProteinFile(null);
+                      setPdbId("");
+                    }}
                     disabled={isEmbedding}
                   />
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setProteinFile(null);
+                        setPdbId("");
+                      }}
+                      className="rounded-md p-1.5 text-faint transition hover:bg-ink/5 hover:text-ink"
+                      title="Use a PDB ID"
+                    >
+                      <Globe2 className="size-4" />
+                    </button>
+                    <Field
+                      label="PDB ID"
+                      htmlFor="membrane-pdb-id"
+                      hint="Download a structure from RCSB by PDB ID"
+                    >
+                      <input
+                        id="membrane-pdb-id"
+                        type="text"
+                        maxLength={4}
+                        value={pdbId}
+                        onChange={(event) =>
+                          setPdbId(event.target.value.toUpperCase())
+                        }
+                        disabled={isEmbedding || !!proteinFile}
+                        className="w-full text-uppercase"
+                        placeholder="7YAE"
+                      />
+                    </Field>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (pdbId.length === 4) {
+                          fetchPdbMutation.mutate(pdbId);
+                        }
+                      }}
+                      disabled={
+                        fetchPdbMutation.isPending ||
+                        pdbId.length !== 4 ||
+                        isEmbedding
+                      }
+                      className="rounded-md p-1.5 text-faint transition hover:bg-ink/5 hover:text-ink"
+                      title="Fetch PDB from RCSB"
+                    >
+                      {fetchPdbMutation.isPending ? (
+                        <Loader2 className="size-4" />
+                      ) : (
+                        <Plus className="size-4" />
+                      )}
+                    </button>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -505,65 +732,49 @@ export default function MembraneEmbedPage() {
               </div>
             </CardBody>
           </Card>
-
-          {prepJobs && prepJobs.length > 0 && (
-            <Card>
-              <CardBody className="p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-[13px] font-semibold text-ink">
-                    Recent embeddings
-                  </h3>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => queryClient.invalidateQueries({ queryKey: ["prep"] })}
-                  >
-                    Refresh
-                  </Button>
-                </div>
-                <div className="space-y-2">
-                  {prepJobs.slice(0, 5).map((job) => (
-                    <div
-                      key={job.id}
-                      className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-line bg-surface/50"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <p className="text-[12.5px] font-medium text-ink truncate">
-                          Membrane embedding · {job.type}
-                        </p>
-                        <p className="text-[11px] text-faint">
-                          {job.status} · {new Date(job.created_at).toLocaleString()}
-                        </p>
-                      </div>
-                      <span
-                        className={cn(
-                          "text-[11px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-md",
-                          job.status === "completed"
-                            ? "bg-emerald-50 text-emerald-700"
-                            : job.status === "failed"
-                              ? "bg-rose-50 text-rose-700"
-                            : job.status === "canceled"
-                              ? "bg-amber-50 text-amber-700"
-                              : "bg-brand-50 text-brand-700",
-                        )}
-                      >
-                        {job.status}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => navigate(`/prep/membrane/${job.id}`)}
-                        className="rounded-md p-1.5 text-faint transition hover:bg-ink/5 hover:text-ink"
-                        title="View details"
-                      >
-                        <Globe2 className="size-3.5" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </CardBody>
-            </Card>
+            </form>
           )}
-        </form>
+
+          <Card className={formOpen ? "mt-6" : ""}>
+            <CardHeader
+              title="All embeddings"
+              description="Every membrane embedding in this workspace, newest first."
+              action={
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() =>
+                    queryClient.invalidateQueries({ queryKey: ["prep"] })
+                  }
+                >
+                  Refresh
+                </Button>
+              }
+            />
+            {embeddings.length === 0 ? (
+              <EmptyState
+                icon={<Layers className="size-5" />}
+                title="No embeddings yet"
+                description="Embed a protein structure in a lipid bilayer, then use the result to launch simulations."
+                action={
+                  <Button
+                    variant="primary"
+                    leadingIcon={<Plus className="size-4" />}
+                    onClick={() => setFormOpen(true)}
+                  >
+                    New embedding
+                  </Button>
+                }
+              />
+            ) : (
+              <div className="divide-y divide-line">
+                {embeddings.map((job) => (
+                  <PrepJobRow key={job.id} job={job} />
+                ))}
+              </div>
+            )}
+          </Card>
+        </>
       )}
     </div>
   );

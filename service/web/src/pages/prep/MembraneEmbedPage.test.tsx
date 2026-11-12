@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import React from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
@@ -84,10 +84,22 @@ describe("MembraneEmbedPage", () => {
     setPrepJobsData([]);
   });
 
-  it("renders the embedding form when prep is enabled", () => {
+  it("shows the embedding history first, with a New embedding action", () => {
     renderPage();
 
-    expect(screen.getByText("Membrane embedding")).toBeTruthy();
+    // The list is the page's main content, exactly like the simulations
+    // table: history is visible without scrolling.
+    expect(screen.getByText("All embeddings")).toBeTruthy();
+    expect(screen.getByText("No embeddings yet")).toBeTruthy();
+    expect(screen.getAllByText(/New embedding/).length).toBeGreaterThan(0);
+  });
+
+  it("opens the embedding form on request", () => {
+    renderPage();
+
+    // The form starts closed; the primary action opens it.
+    expect(screen.queryByText(/1\. Protein structure/)).toBeNull();
+    fireEvent.click(screen.getAllByText(/New embedding/)[0]!);
     expect(screen.getByText(/1\. Protein structure/)).toBeTruthy();
     expect(screen.getByText(/Start membrane embedding/)).toBeTruthy();
   });
@@ -111,7 +123,97 @@ describe("MembraneEmbedPage", () => {
   it("disables submit when no file is selected", () => {
     renderPage();
 
+    fireEvent.click(screen.getAllByText(/New embedding/)[0]!);
     const submit = screen.getByText(/Start membrane embedding/);
     expect((submit as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("survives navigation between the form and a job view", async () => {
+    // Regression: the form and the job view used to live in one component
+    // behind an early return, so navigating between the two routes changed
+    // the number of hooks React saw.  React reports "change in the order of
+    // Hooks" and then fails internally ("Expected static flag was missing"),
+    // which blanks the page until a refresh.
+    const prepJob = {
+      id: "job-1",
+      type: "membrane_embed",
+      status: "running",
+      created_at: new Date().toISOString(),
+      output_file_ids: [],
+      phase: "packing",
+      progress_percent: 42,
+      progress_message: "packing POPC.pdb (block 2/9, loop 3/20)",
+    };
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/prep/jobs/job-1")) {
+        return new Response(JSON.stringify(prepJob), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const navRouter = createMemoryRouter(
+      [
+        { path: "/prep/membrane", element: React.createElement(MembraneEmbedPage) },
+        {
+          path: "/prep/membrane/:prepJobId",
+          element: React.createElement(MembraneEmbedPage),
+        },
+      ],
+      { initialEntries: ["/prep/membrane"] }
+    );
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ToastProvider>
+          <RouterProvider router={navRouter} />
+        </ToastProvider>
+      </QueryClientProvider>
+    );
+
+    expect(screen.getByText("All embeddings")).toBeTruthy();
+
+    // Open the form, then navigate to the job view; the component instance
+    // is reused, so a changing hook count would blow up here.
+    fireEvent.click(screen.getAllByText(/New embedding/)[0]!);
+    expect(screen.getByText(/1\. Protein structure/)).toBeTruthy();
+
+    await act(async () => {
+      await navRouter.navigate("/prep/membrane/job-1");
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("packing POPC.pdb (block 2/9, loop 3/20)")
+      ).toBeTruthy();
+    });
+    expect(screen.getByText("42%")).toBeTruthy();
+
+    // And back again.
+    await act(async () => {
+      await navRouter.navigate("/prep/membrane");
+    });
+    await waitFor(() => {
+      expect(screen.getByText("All embeddings")).toBeTruthy();
+    });
+
+    // The hook order must not have changed across either navigation.
+    const hookOrderErrors = consoleError.mock.calls.filter((call) =>
+      String(call[0]).includes("order of Hooks"),
+    );
+    expect(hookOrderErrors).toEqual([]);
+
+    consoleError.mockRestore();
+    vi.unstubAllGlobals();
   });
 });

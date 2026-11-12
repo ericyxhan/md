@@ -7,7 +7,7 @@ path, command, executable, platform property, or raw TOML document.
 from __future__ import annotations
 
 import re
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -299,6 +299,17 @@ class FileOut(BaseModel):
     created_at: str
 
 
+class FileInspectOut(BaseModel):
+    """Structure summary for any upload, used to populate chain/ligand pickers."""
+
+    chains: dict[str, dict[str, Any]]
+    ligands: list[str]
+    components: dict[str, int]
+    atom_count: int
+    model_count: int
+    bounding_box: dict[str, Any] | None = None
+
+
 class StageOut(BaseModel):
     name: str
     kind: str
@@ -355,6 +366,16 @@ class EventOut(BaseModel):
     created_at: str
 
 
+class EventWithJobOut(EventOut):
+    """An event enriched with its parent job for cross-job event feeds."""
+
+    job_id: str
+    job_name: str
+    job_status: str
+    source: str = "job"
+    prep_type: str | None = None
+
+
 class ArtifactOut(BaseModel):
     id: str
     stage_name: str | None = None
@@ -368,6 +389,51 @@ class ArtifactOut(BaseModel):
 
 class ArtifactListOut(BaseModel):
     items: list[ArtifactOut]
+
+
+class ViewFileOut(BaseModel):
+    id: str
+    name: str
+    relative_path: str
+    size_bytes: int
+    url: str
+
+
+class ViewOut(BaseModel):
+    group: str
+    structure: ViewFileOut | None = None
+    trajectory: ViewFileOut | None = None
+    manifest: ViewFileOut | None = None
+    manifest_data: dict | None = None
+
+
+class ViewListOut(BaseModel):
+    items: list[ViewOut]
+
+
+class SeriesPoint(BaseModel):
+    """One downsampled time-series point from a stage's simulation.log."""
+
+    step: int
+    time_ps: float | None = None
+    potential_energy_kj_mol: float | None = None
+    kinetic_energy_kj_mol: float | None = None
+    temperature_k: float | None = None
+    density_g_ml: float | None = None
+    volume_nm3: float | None = None
+    speed_ns_day: float | None = None
+    elapsed_s: float | None = None
+
+
+class SeriesOut(BaseModel):
+    """Downsampled time series for a completed stage."""
+
+    group: str
+    source: str
+    source_points: int
+    view_points: int
+    columns: list[str]
+    points: list[SeriesPoint]
 
 
 class LogOut(BaseModel):
@@ -449,8 +515,10 @@ class PrepJobStatus(BaseModel):
     error: str | None = None
     phase: str | None = None
     progress_percent: float | None = None
+    progress_message: str | None = None
     progress_updated_at: str | None = None
     cancel_requested: bool | None = None
+    label: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -458,7 +526,9 @@ class PrepJobStatus(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-SystemPrepOperation = Literal["remove_ligand", "select_chain", "add_ligand"]
+SystemPrepOperation = Literal[
+    "remove_ligand", "select_chain", "add_ligand", "remove_residues", "keep_selection"
+]
 
 
 class SystemPrepStep(StrictModel):
@@ -482,6 +552,11 @@ class SystemPrepStep(StrictModel):
         max_length=20,
         description="Ligand file IDs to add (for add_ligand)",
     )
+    residue_specs: list[dict[str, Any]] = Field(
+        default_factory=list,
+        max_length=100,
+        description="Explicit residue specs {chain, resnum, icode} (for remove_residues/keep_selection)",
+    )
 
     @model_validator(mode="after")
     def _validate_step(self) -> "SystemPrepStep":
@@ -491,6 +566,8 @@ class SystemPrepStep(StrictModel):
             raise ValueError("select_chain requires chain_to_keep")
         if self.operation == "add_ligand" and not self.ligand_file_ids:
             raise ValueError("add_ligand requires at least one ligand_file_id")
+        if self.operation in ("remove_residues", "keep_selection") and not self.residue_specs:
+            raise ValueError(f"{self.operation} requires residue_specs")
         return self
 
 
@@ -532,3 +609,82 @@ class SystemPrepOut(BaseModel):
     status: str
     output_file_ids: list[str] = []
     error: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Workflows (base systems + derived simulation jobs)
+# ---------------------------------------------------------------------------
+
+
+class WorkflowCreate(StrictModel):
+    """Create a workflow from a completed prep/embed output file."""
+
+    name: str = Field(min_length=1, max_length=200)
+    source_file_id: str = Field(
+        min_length=1, max_length=64,
+        description="Output file ID from a completed system-prep or membrane-embed job",
+    )
+    source_type: str = Field(
+        default="system_prep",
+        description="Kind of prep job that produced the source file",
+    )
+
+
+class WorkflowJobSummary(BaseModel):
+    """Lightweight job representation for workflow listings."""
+
+    id: str
+    name: str
+    status: str
+    phase: str | None
+    progress: ProgressOut
+    created_at: str
+    updated_at: str
+
+
+class WorkflowOut(BaseModel):
+    id: str
+    name: str
+    source_file_id: str
+    source_type: str
+    job_count: int
+    created_at: str
+    updated_at: str
+
+
+class WorkflowDetailOut(BaseModel):
+    id: str
+    name: str
+    source_file_id: str
+    source_type: str
+    created_at: str
+    updated_at: str
+    jobs: list[WorkflowJobSummary]
+
+
+class WorkflowVariantsRequest(StrictModel):
+    """Create N variant simulation jobs from a workflow's base system."""
+
+    count: int = Field(default=1, ge=1, le=50)
+    name_template: str = Field(
+        default="{name} · variant {n}",
+        min_length=1,
+        max_length=200,
+        description="Template with {name} and {n} placeholders",
+    )
+    parameterization: ParameterizationSpec | None = Field(
+        default=None,
+        description="Override parameterization for all variants",
+    )
+    minimization: MinimizationSpec | None = Field(
+        default=None, description="Override minimization for all variants"
+    )
+    equilibration: list[StageSpec] | None = Field(
+        default=None,
+        max_length=MAX_EQUILIBRATION_STAGES,
+        description="Override equilibration stages for all variants",
+    )
+    production: ProductionSpec | None = Field(
+        default=None, description="Override production spec for all variants"
+    )
+

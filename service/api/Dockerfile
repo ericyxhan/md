@@ -2,6 +2,14 @@
 #   docker build -f service/api/Dockerfile .
 FROM python:3.13-slim
 
+# Shared contract values.  They are declared here so the image can be built
+# with the same account and port as the rest of the stack; compose passes
+# them from service/contract.env.  The defaults match that file and
+# scripts/check-contract.py asserts that they still do.
+ARG MD_SERVICE_UID=10001
+ARG MD_SERVICE_GID=10001
+ARG MD_API_PORT=8000
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
@@ -21,8 +29,8 @@ RUN apt-get update \
 
 WORKDIR /app
 
-RUN groupadd --gid 10001 mdservice \
-    && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin mdservice
+RUN groupadd --gid ${MD_SERVICE_GID} mdservice \
+    && useradd --uid ${MD_SERVICE_UID} --gid ${MD_SERVICE_GID} --no-create-home --shell /usr/sbin/nologin mdservice
 
 COPY service/api/requirements.txt /tmp/requirements.txt
 RUN python -m pip install --upgrade pip \
@@ -33,10 +41,12 @@ RUN python -m pip install --upgrade pip \
 COPY config.py /app/config.py
 COPY service/api /app
 
-RUN python -m compileall -q /app/app && chown -R 10001:10001 /app
+RUN python -m compileall -q /app/app && chown -R ${MD_SERVICE_UID}:${MD_SERVICE_GID} /app
 
-USER 10001:10001
+USER ${MD_SERVICE_UID}:${MD_SERVICE_GID}
 
-EXPOSE 8000
+EXPOSE ${MD_API_PORT}
 
+# The exec form cannot expand build arguments, so the port is written out.
+# Compose overrides this command with the value from the contract.
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

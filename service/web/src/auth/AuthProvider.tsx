@@ -73,6 +73,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signOut = useCallback(async () => {
     try {
       await api.logout();
+    } catch {
+      // The local session is cleared either way; a failed logout request
+      // must not surface as an unhandled rejection.
     } finally {
       setSession(null);
       setStatus("anonymous");

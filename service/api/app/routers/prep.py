@@ -18,7 +18,13 @@ from ..schemas import (
     SystemPrepRequest,
 )
 from ..security import require_owner
-from ..services.prep import queue_membrane_embed, queue_system_prep
+from ..services.events import add_prep_event
+from ..services.prep import (
+    fetch_pdb_file,
+    prep_job_label,
+    queue_membrane_embed,
+    queue_system_prep,
+)
 from ..services.prep_lifecycle import cancel_prep
 from ..timeutils import utcnow_iso
 
@@ -54,7 +60,10 @@ def request_membrane_embed(
             id=prep_job_id,
             owner_id=owner,
             type="membrane_embed",
-            status="queued",
+            # "pending" is not claimable by the prep worker.  The job is
+            # flipped to "queued" once the input has been validated, so a
+            # worker never picks up a job with an unusable input.
+            status="pending",
             request_json=json.dumps(
                 {
                     "protein_file_id": body.protein_file_id,
@@ -69,6 +78,13 @@ def request_membrane_embed(
             updated_at=utcnow_iso(),
         )
         session.add(job)
+        add_prep_event(
+            session,
+            prep_job_id,
+            "created",
+            f"Membrane embedding queued for {body.lipid}",
+            {"lipid": body.lipid, "box_padding_nm": body.box_padding_nm},
+        )
         session.commit()
 
     # Validate the input file before leaving the job queued for the worker.
@@ -100,6 +116,31 @@ def request_membrane_embed(
         prep_job_id=prep_job_id,
         status="queued",
     )
+
+
+@router.post("/prep/fetch-pdb", response_model=dict)
+def fetch_pdb(
+    request: Request,
+    body: dict,
+    owner: str = Depends(require_owner),
+) -> dict:
+    """Download a PDB from RCSB and register it as a FileRecord.
+
+    Returns the file_id so the frontend can preview it immediately
+    before submitting a prep job.
+    """
+
+    pdb_id = str(body.get("pdb_id", "")).strip()
+    if not pdb_id:
+        raise APIError(400, "missing_pdb_id", "PDB ID is required")
+
+    file_id = fetch_pdb_file(
+        pdb_id=pdb_id,
+        owner=owner,
+        settings=request.app.state.settings,
+    )
+
+    return {"file_id": file_id}
 
 
 @router.post("/prep/system-prep", response_model=SystemPrepOut)
@@ -135,7 +176,10 @@ def request_system_prep(
             id=prep_job_id,
             owner_id=owner,
             type="system_prep",
-            status="queued",
+            # "pending" is not claimable by the prep worker.  The job is
+            # flipped to "queued" once the input has been validated, so a
+            # worker never picks up a job with an unusable input.
+            status="pending",
             request_json=json.dumps(
                 {
                     "type": "system_prep",
@@ -158,6 +202,13 @@ def request_system_prep(
             updated_at=utcnow_iso(),
         )
         session.add(job)
+        add_prep_event(
+            session,
+            prep_job_id,
+            "created",
+            f"System preparation queued with {len(body.steps)} step(s)",
+            {"steps": len(body.steps)},
+        )
         session.commit()
 
     try:
@@ -216,6 +267,12 @@ def get_prep_job_status(
             completed_at=job.completed_at,
             output_file_ids=output_file_ids,
             error=job.error_message,
+            phase=job.phase,
+            progress_percent=job.progress_percent,
+            progress_message=job.progress_message,
+            progress_updated_at=job.progress_updated_at,
+            cancel_requested=job.cancel_requested,
+            label=prep_job_label(job),
         )
 
 
@@ -253,6 +310,12 @@ def list_prep_jobs_endpoint(
                 completed_at=job.completed_at,
                 output_file_ids=output_file_ids,
                 error=job.error_message,
+                phase=job.phase,
+                progress_percent=job.progress_percent,
+                progress_message=job.progress_message,
+                progress_updated_at=job.progress_updated_at,
+                cancel_requested=job.cancel_requested,
+                label=prep_job_label(job),
             )
         )
     return result
@@ -266,8 +329,7 @@ def cancel_prep_job(
 ) -> dict:
     """Request cancellation of a queued or running prep job."""
 
-    settings = request.app.state.settings
-    session_factory = create_session_factory(request.app.state.engine)
+    session_factory = request.app.state.session_factory
 
     with session_factory() as session:
         job = session.get(PrepJob, prep_job_id)
@@ -275,17 +337,13 @@ def cancel_prep_job(
             raise APIError(
                 404, "prep_job_not_found", f"Prep job {prep_job_id!r} not found"
             )
+        status = job.status
 
-        if job.status in ("completed", "failed", "canceled"):
-            return {"status": job.status}
+    if status in ("completed", "failed", "canceled"):
+        return {"status": status}
 
-        job.cancel_requested = True
-        job.updated_at = utcnow_iso()
-        if job.status == "queued":
-            job.status = "canceled"
-            job.completed_at = utcnow_iso()
-        elif job.status in ("claimed", "running"):
-            job.status = "canceling"
-        session.commit()
-
+    # The transition itself goes through the shared lifecycle helper so it
+    # is serialized against the prep worker's claim.
+    with session_factory() as session:
+        job = cancel_prep(session, prep_job_id)
         return {"status": job.status}

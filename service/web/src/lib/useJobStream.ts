@@ -29,9 +29,19 @@ interface ProgressSnapshot {
 export function useJobStream(jobId: string | undefined) {
   const queryClient = useQueryClient();
   const [connected, setConnected] = useState(false);
-  const [liveEvents, setLiveEvents] = useState<JobEvent[]>([]);
+  const [live, setLive] = useState<{
+    jobId: string | undefined;
+    events: JobEvent[];
+  }>({ jobId, events: [] });
   const eventIds = useRef<Set<number>>(new Set());
   const lastEventId = useRef<number | undefined>(undefined);
+
+  // Navigating from one job to another must not carry the previous job's
+  // events over.  React discards this render and re-runs it with the new
+  // state, so the stale events are never painted.
+  if (live.jobId !== jobId) {
+    setLive({ jobId, events: [] });
+  }
 
   useEffect(() => {
     if (!jobId) return;
@@ -39,6 +49,11 @@ export function useJobStream(jobId: string | undefined) {
     let source: EventSource | null = null;
     let disposed = false;
     let failures = 0;
+
+    // The job changed (or the hook just mounted): start from a clean slate
+    // so the previous job's event ids and watermark are not reused.
+    eventIds.current = new Set();
+    lastEventId.current = undefined;
 
     const recordEvent = (event: JobEvent) => {
       if (typeof event.id === "number") {
@@ -49,7 +64,11 @@ export function useJobStream(jobId: string | undefined) {
           event.id,
         );
       }
-      setLiveEvents((previous) => [...previous, event]);
+      setLive((previous) => {
+        // Ignore a frame that arrives after the job changed.
+        if (previous.jobId !== jobId) return previous;
+        return { ...previous, events: [...previous.events, event] };
+      });
     };
 
     const connect = () => {
@@ -67,7 +86,13 @@ export function useJobStream(jobId: string | undefined) {
         } catch {
           // Ignore malformed frames; the polling path remains authoritative.
         }
-        queryClient.invalidateQueries({ queryKey: queryKeys.job(jobId) });
+        // `exact` matters: the job key is a prefix of the events, artifacts,
+        // logs, spec, views and series keys, so a plain invalidation would
+        // refetch all of them on every event frame.
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.job(jobId),
+          exact: true,
+        });
       });
 
       source.addEventListener("progress", (message) => {
@@ -105,7 +130,10 @@ export function useJobStream(jobId: string | undefined) {
       source.addEventListener("end", () => {
         setConnected(false);
         source?.close();
-        queryClient.invalidateQueries({ queryKey: queryKeys.job(jobId) });
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.job(jobId),
+          exact: true,
+        });
         queryClient.invalidateQueries({ queryKey: queryKeys.events(jobId) });
         queryClient.invalidateQueries({ queryKey: queryKeys.artifacts(jobId) });
         queryClient.invalidateQueries({ queryKey: queryKeys.logs(jobId) });
@@ -130,5 +158,5 @@ export function useJobStream(jobId: string | undefined) {
     };
   }, [jobId, queryClient]);
 
-  return { connected, liveEvents };
+  return { connected, liveEvents: live.events };
 }

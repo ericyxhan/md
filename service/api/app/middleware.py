@@ -31,6 +31,24 @@ def _owner_from_scope(scope: dict[str, Any]) -> str | None:
     return getattr(state, "owner_id", None)
 
 
+def _resolve_client_ip(scope: dict[str, Any], headers: Headers) -> str | None:
+    """Return the address of the client that opened the connection.
+
+    The API is reached through Caddy, which resolves the real client from
+    the proxy chain and rewrites X-Forwarded-For to that single value.  The
+    socket peer is the local proxy in that case, so reading the header is
+    what keeps the per-IP login limiter and the audit trail meaningful.
+    """
+
+    forwarded = headers.get("x-forwarded-for")
+    if forwarded:
+        entries = [part.strip() for part in forwarded.split(",") if part.strip()]
+        if entries:
+            return entries[0][:64]
+    client = scope.get("client")
+    return client[0] if client else None
+
+
 class RequestContextMiddleware:
     """Attach a request ID, bind context variables, and log completion."""
 
@@ -47,7 +65,11 @@ class RequestContextMiddleware:
             headers.get(REQUEST_ID_HEADER)
         ) or new_request_id()
         client = scope.get("client")
-        client_ip = client[0] if client else None
+        settings = scope["app"].state.settings
+        if settings.trust_forwarded_for:
+            client_ip = _resolve_client_ip(scope, headers)
+        else:
+            client_ip = client[0] if client else None
         method = str(scope.get("method", "")).upper()
         path = str(scope.get("path", ""))[:512]
         job_id = extract_job_id(path)

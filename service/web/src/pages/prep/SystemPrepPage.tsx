@@ -1,8 +1,4 @@
-import {
-  useCallback,
-  useState,
-  type ChangeEvent,
-} from "react";
+import { Suspense, useCallback, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -10,6 +6,7 @@ import {
   Download,
   FileUp,
   Globe2,
+  Layers,
   Loader2,
   Minus,
   Plus,
@@ -18,70 +15,198 @@ import {
   Trash2,
 } from "lucide-react";
 import type {
+  FileInspect,
   FileOut,
-  PDBInspection,
   SystemPrepOut,
   SystemPrepRequest,
   SystemPrepStep,
 } from "../../lib/types";
 import {
   cancelPrepJob,
+  createWorkflow,
+  fetchPdb,
+  filePreviewUrl,
   getPrepJob,
   listPrepJobs,
   requestSystemPrep,
 } from "../../lib/api";
-import { usePrepJob, usePrepJobs, useCapabilities } from "../../lib/queries";
+import {
+  useCapabilities,
+  usePrepJob,
+  usePrepJobs,
+  useFileInspect,
+} from "../../lib/queries";
 import { useToast } from "../../components/ui/Toast";
 import { PageHeader } from "../../components/layout/PageHeader";
 import { Button } from "../../components/ui/Button";
-import { Card, CardBody } from "../../components/ui/Card";
-import { EmptyState, PageLoader } from "../../components/ui/EmptyState";
+import { Card, CardBody, CardHeader } from "../../components/ui/Card";
+import { EmptyState, PageLoader, Spinner } from "../../components/ui/EmptyState";
 import { FileDropzone } from "../../components/upload/FileDropzone";
-import { Field, Select, SuffixInput, Toggle } from "../../components/ui/Form";
+import { PrepJobRow } from "../../components/jobs/PrepJobCards";
+import { Field } from "../../components/ui/Form";
 import { ProgressBar } from "../../components/ui/Progress";
-import { cn } from "../../lib/utils";
+import { cn, formatCompact, isPrepActive } from "../../lib/utils";
+import { structureFormat } from "../../lib/utils";
+import { StructurePreview } from "../../components/viewer/StructurePreview";
+import { SelectionPanel } from "../../components/viewer/SelectionPanel";
+import { EditStack } from "../../components/viewer/EditStack";
 
-const OPERATIONS: Array<{
-  value: SystemPrepStep["operation"];
+type StructurePreviewCardProps = {
+  url: string;
+  file: FileOut;
+  inspect: FileInspect | null;
+  isLoading: boolean;
+}
+
+function StructurePreviewCard({
+  url,
+  file,
+  inspect,
+  isLoading,
+}: StructurePreviewCardProps) {
+  const format = structureFormat(file.name);
+  const previewable = Boolean(format);
+
+  if (isLoading) {
+    return (
+      <Card className="overflow-hidden">
+        <CardBody className="px-5 py-8">
+          <div className="flex flex-col items-center justify-center text-center">
+            <Spinner className="size-4" />
+            <p className="mt-2 text-[12.5px] text-muted">Inspecting structure\u2026</p>
+          </div>
+        </CardBody>
+      </Card>
+    );
+  }
+
+  if (!previewable) {
+    return (
+      <Card className="overflow-hidden">
+        <CardBody className="px-5 py-8">
+          <EmptyState
+            icon={<AlertCircle className="size-5 text-amber-600" />}
+            title="Preview unavailable"
+            description={file.name + " (" + formatCompact(file.size_bytes) + ") is supported for upload but does not have a viewer representation yet."}
+          />
+        </CardBody>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="overflow-hidden">
+      <CardBody className="px-5 py-4 space-y-4">
+        <div className="flex items-center justify-between">
+          <p className="text-[12px] font-semibold text-ink">Structure preview</p>
+          <p className="text-[11px] text-muted">{formatCompact(file.size_bytes)}</p>
+        </div>
+
+        <StructurePreview
+          url={url}
+          format={format ?? undefined}
+          label={file.name}
+          sourceSizeBytes={file.size_bytes}
+          className="h-[320px] overflow-hidden rounded-lg border border-line bg-surface relative"
+        />
+
+        {inspect && (
+          <div className="grid grid-cols-2 gap-4 text-[11px]">
+            <MetricRow label="Total atoms" value={formatCompact(inspect.atom_count)} tone="ink" />
+            <MetricRow label="Models" value={inspect.model_count} tone="ink" />
+            <MetricRow label="Protein" value={formatCompact(inspect.components.protein)} tone="brand" />
+            <MetricRow label="Water" value={formatCompact(inspect.components.water)} tone="brand" />
+            <MetricRow label="Ions" value={formatCompact(inspect.components.ion)} tone="brand" />
+            <MetricRow label="Ligands" value={formatCompact(inspect.components.ligand)} tone="brand" />
+          </div>
+        )}
+      </CardBody>
+    </Card>
+  );
+}
+
+function MetricRow({
+  label,
+  value,
+  tone,
+}: {
   label: string;
-  description: string;
-}> = [
-  {
-    value: "remove_ligand",
-    label: "Remove ligand",
-    description: "Strip all residues with a given name from the structure",
-  },
-  {
-    value: "select_chain",
-    label: "Keep chain",
-    description: "Keep only one chain and discard the rest",
-  },
-  {
-    value: "add_ligand",
-    label: "Add ligand",
-    description: "Append a ligand molecule (SDF/MOL/PDB) to the structure",
-  },
-];
+  value: string | number;
+  tone: "brand" | "ink";
+}) {
+  return (
+    <div className="flex items-baseline justify-between gap-2">
+      <span className="text-muted">{label}</span>
+      <span className={cn("text-ink-soft font-mono tabular-nums", tone === "brand" && "text-brand-700")}>
+        {value}
+      </span>
+    </div>
+  );
+}
 
 export default function SystemPrepPage() {
   const { prepJobId } = useParams<{ prepJobId?: string }>();
+
+  // The view and the form are separate components on purpose.  Handling
+  // both in one component with an early return changes the number of hooks
+  // React sees between renders, which violates the Rules of Hooks: React
+  // throws "Rendered more hooks than during the previous render" and, with
+  // no error boundary above it, the whole page goes blank until a refresh.
+  if (prepJobId) {
+    return <SystemPrepJobView prepJobId={prepJobId} />;
+  }
+  return <SystemPrepForm />;
+}
+
+/**
+ * Shows a claimed or finished system-preparation job.
+ */
+function SystemPrepJobView({ prepJobId }: { prepJobId: string }) {
   const navigate = useNavigate();
   const { push } = useToast();
   const queryClient = useQueryClient();
 
-  // ========================================================================
-  // Viewing an existing prep job
-  // ========================================================================
+  const createWorkflowMutation = useMutation({
+    mutationFn: (payload: { name: string; source_file_id: string; source_type: string }) =>
+      createWorkflow(payload),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["workflows"] });
+      push({
+        title: "Workflow created",
+        description:
+          "'" +
+          data.name +
+          "' is now a base system. Launch variant simulations from the Workflows page.",
+        tone: "info",
+      });
+      navigate("/workflows/" + data.id);
+    },
+    onError: (cause: unknown) => {
+      push({
+        title: "Workflow creation failed",
+        description:
+          cause instanceof Error ? cause.message : "Could not create the workflow.",
+        tone: "error",
+      });
+    },
+  });
 
-  if (prepJobId) {
-    const { data: prepJob, isLoading: isLoadingJob, refetch } = usePrepJob(
-      prepJobId
-    );
+  {
+    const { data: prepJob, isLoading: isLoadingJob, refetch } = usePrepJob(prepJobId);
+
+    // Hoisted above the early returns: a hook that is only reached after a
+    // conditional return would change the hook count between the loading
+    // and the loaded render, which React rejects.
+    const outputFileId = prepJob?.output_file_ids[0];
+    const canDownload =
+      prepJob?.status === "completed" &&
+      (prepJob.output_file_ids?.length ?? 0) > 0;
+    const outputInspect = useFileInspect(outputFileId, canDownload);
 
     if (isLoadingJob) return <PageLoader label="Loading preparation job" />;
     if (!prepJob) {
       return (
-        <div className="mx-auto w-full max-w-[700px] px-4 py-6 sm:px-6 lg:px-8">
+        <div>
           <EmptyState
             icon={<AlertCircle className="size-6" />}
             title="Preparation job not found"
@@ -100,13 +225,12 @@ export default function SystemPrepPage() {
       prepJob.status === "completed" ||
       prepJob.status === "failed" ||
       prepJob.status === "canceled";
-    const active = prepJob.status === "queued" || prepJob.status === "running";
-    const canDownload =
-      prepJob.status === "completed" && prepJob.output_file_ids.length > 0;
+    const active = isPrepActive(prepJob.status);
 
     return (
-      <div className="mx-auto w-full max-w-[700px] px-4 py-6 sm:px-6 lg:px-8">
+      <div>
         <PageHeader
+          className="max-w-[760px]"
           title="System preparation"
           description={
             prepJob.status === "completed"
@@ -115,27 +239,25 @@ export default function SystemPrepPage() {
                 ? "Preparation failed"
                 : prepJob.status === "canceled"
                   ? "Preparation canceled"
-                  : `Preparing ${prepJob.status}…`
+                  : "Preparing " + prepJob.status + "\u2026"
           }
         />
 
-        <Card className="mb-6">
+        <Card className="mb-6 max-w-[760px]">
           <CardBody className="p-6">
             <div className="space-y-5">
               <div className="flex items-start justify-between gap-2">
                 <span className="text-[13px] text-ink-soft">Status</span>
-                <span
-                  className={cn(
-                    "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide",
-                    prepJob.status === "completed"
-                      ? "bg-emerald-50 text-emerald-700"
-                      : prepJob.status === "failed"
-                        ? "bg-rose-50 text-rose-700"
+                <span className={cn(
+                  "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide",
+                  prepJob.status === "completed"
+                    ? "bg-emerald-50 text-emerald-700"
+                    : prepJob.status === "failed"
+                      ? "bg-rose-50 text-rose-700"
                         : prepJob.status === "canceled"
                           ? "bg-amber-50 text-amber-700"
                           : "bg-brand-50 text-brand-700",
-                  )}
-                >
+                )}>
                   {prepJob.status.charAt(0).toUpperCase() +
                     prepJob.status.slice(1)}
                 </span>
@@ -151,27 +273,32 @@ export default function SystemPrepPage() {
                 </div>
               )}
 
-              {active && prepJob.progress_percent != null && (
+              {active && (
                 <div className="space-y-2">
                   <div className="flex items-start justify-between gap-2">
                     <span className="text-[13px] text-ink-soft">Progress</span>
                     <span className="text-[13px] font-medium text-ink">
-                      {prepJob.progress_percent}%{" "}
-                      {prepJob.progress_percent === 100 ? "(finalizing…)" : ""}
+                      {prepJob.progress_percent != null
+                        ? `${Math.round(prepJob.progress_percent)}%`
+                        : "Working…"}
                     </span>
                   </div>
                   <ProgressBar
-                    value={prepJob.progress_percent ?? 0}
+                    value={prepJob.progress_percent ?? 100}
                     className="h-3"
+                    animated={prepJob.progress_percent == null}
                   />
+                  {prepJob.progress_message ? (
+                    <p className="text-[11.5px] leading-relaxed text-muted">
+                      {prepJob.progress_message}
+                    </p>
+                  ) : null}
                 </div>
               )}
 
               {prepJob.error && (
                 <div className="rounded-md p-3 bg-rose-50 border border-rose-100">
-                  <p className="text-[12.5px] text-rose-700">
-                    {prepJob.error}
-                  </p>
+                  <p className="text-[12.5px] text-rose-700">{prepJob.error}</p>
                 </div>
               )}
 
@@ -198,7 +325,7 @@ export default function SystemPrepPage() {
                           </p>
                         </div>
                         <a
-                          href={`/api/v1/files/${fileId}`}
+                          href={"/api/v1/files/" + fileId}
                           className="rounded-md p-1.5 text-faint transition hover:bg-ink/5 hover:text-ink"
                           title="Download"
                         >
@@ -207,7 +334,7 @@ export default function SystemPrepPage() {
                         <button
                           type="button"
                           onClick={() => {
-                            navigate(`/new?prepFileId=${fileId}`);
+                            navigate("/new?prepFileId=" + fileId);
                           }}
                           className="rounded-md p-1.5 text-brand-700 transition hover:bg-brand-50 hover:text-brand-800"
                           title="Use in simulation"
@@ -220,14 +347,72 @@ export default function SystemPrepPage() {
                   <Button
                     variant="primary"
                     onClick={() =>
-                      navigate(`/new?prepFileId=${prepJob.output_file_ids[0]}`)
+                      navigate("/new?prepFileId=" + prepJob.output_file_ids[0])
                     }
                     className="w-full"
                     disabled={!prepJob.output_file_ids[0]}
                   >
                     Use prepared system in simulation
                   </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={() =>
+                      navigate(
+                        "/prep/membrane?prepFileId=" +
+                          prepJob.output_file_ids[0]
+                      )
+                    }
+                    className="w-full sm:w-auto mt-2"
+                    disabled={!prepJob.output_file_ids[0]}
+                  >
+                    Use in membrane embedding
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      createWorkflowMutation.mutate({
+                        name:
+                          "Workflow · " +
+                          prepJob.type +
+                          " · " +
+                          new Date().toLocaleDateString(),
+                        source_file_id: prepJob.output_file_ids[0]!,
+                        source_type: "system_prep",
+                      });
+                    }}
+                    className="w-full sm:w-auto mt-2"
+                    disabled={
+                      !prepJob.output_file_ids[0] ||
+                      createWorkflowMutation.isPending
+                    }
+                  >
+                    {createWorkflowMutation.isPending ? "Creating…" : "Save as workflow base system"}
+                  </Button>
                 </div>
+              )}
+
+              {canDownload && prepJob.output_file_ids.length > 0 && (
+                <Card className="mb-6 max-w-[760px] overflow-hidden">
+                  <CardHeader
+                    title="Output structure"
+                    description="Solute-focused view of the prepared system"
+                  />
+                  <CardBody className="px-5 py-4">
+                    <StructurePreviewCard
+                      url={filePreviewUrl(outputFileId ?? "")}
+                      file={{
+                        id: prepJob.output_file_ids[0],
+                        name: "prepared.pdb",
+                        size_bytes: 0,
+                        sha256: "",
+                        content_type: "chemical/x-pdb",
+                        created_at: "",
+                      }}
+                      inspect={outputInspect.data ?? null}
+                      isLoading={outputInspect.isLoading}
+                    />
+                  </CardBody>
+                </Card>
               )}
 
               {active && !terminal && (
@@ -281,7 +466,7 @@ export default function SystemPrepPage() {
               {!active && !terminal && (
                 <div className="flex items-center gap-2 text-[12.5px] text-muted">
                   <Loader2 className="size-4" />
-                  Waiting for a prep worker to pick up this job…
+                  Waiting for a prep worker to pick up this job\u2026
                 </div>
               )}
 
@@ -299,30 +484,32 @@ export default function SystemPrepPage() {
       </div>
     );
   }
+}
 
-  // ========================================================================
-  // Creating a new prep job
-  // ========================================================================
+/**
+ * The system-preparation request form.
+ */
+function SystemPrepForm() {
+  const navigate = useNavigate();
+  const { push } = useToast();
+  const queryClient = useQueryClient();
 
   const [inputFile, setInputFile] = useState<FileOut | null>(null);
   const [pdbId, setPdbId] = useState("");
-  const [steps, setSteps] = useState<SystemPrepStep[]>([
-    { operation: "remove_ligand", ligand_to_remove: undefined },
-  ]);
-  const [capabilitiesError, setCapabilitiesError] = useState<string | null>(
-    null
-  );
+  const [prepEdits, setPrepEdits] = useState<SystemPrepStep[]>([]);
 
-  const { data: capabilities, refetch: refetchCapabilities } =
-    useCapabilities();
+  // The history is the page's main content; the request form opens on demand.
+  const [formOpen, setFormOpen] = useState(false);
 
-  const prepEnabled = !!capabilities; // system prep doesn't need packmol
+  const { data: capabilities } = useCapabilities();
+
+  const prepEnabled = !!capabilities;
 
   const prepMutation = useMutation({
     mutationFn: requestSystemPrep,
     onSuccess: (data: SystemPrepOut) => {
       queryClient.invalidateQueries({ queryKey: ["prep"] });
-      navigate(`/prep/system-prep/${data.prep_job_id}`);
+      navigate("/prep/system-prep/" + data.prep_job_id);
     },
     onError: (cause: unknown) => {
       const message =
@@ -331,64 +518,66 @@ export default function SystemPrepPage() {
     },
   });
 
+  const fetchPdbMutation = useMutation({
+    mutationFn: async (pdbId: string) => fetchPdb(pdbId),
+    onSuccess: (data) => {
+      setPdbId("");
+      setInputFile({
+        id: data.file_id,
+        name: pdbId.toUpperCase() + ".pdb",
+        size_bytes: 0,
+        sha256: "",
+        content_type: "chemical/x-pdb",
+        created_at: "",
+      });
+      setPrepEdits([]);
+    },
+    onError: (cause: unknown) => {
+      const message =
+        cause instanceof Error ? cause.message : "Failed to fetch PDB";
+      push({ title: "Fetch failed", description: message, tone: "error" });
+    },
+  });
+
   const isPrepping = prepMutation.isPending;
 
   const inputSelected = !!inputFile || pdbId.length === 4;
   const canSubmit =
     inputSelected &&
-    steps.length > 0 &&
+    prepEdits.length > 0 &&
     !isPrepping &&
     prepEnabled;
 
-  const handleSubmit = (event: ChangeEvent<HTMLFormElement>) => {
+  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!canSubmit) return;
 
     const payload: SystemPrepRequest = {
-      name: `System preparation · ${new Date().toLocaleString()}`,
+      name: "System preparation \u00b7 " + new Date().toLocaleString(),
       input_file_id: inputFile?.id ?? null,
       pdb_id: pdbId.length === 4 ? pdbId.toUpperCase() : null,
-      steps: steps.map((step) => ({
-        operation: step.operation,
-        ligand_to_remove:
-          step.operation === "remove_ligand"
-            ? step.ligand_to_remove?.trim().toUpperCase() || undefined
-            : undefined,
-        chain_to_keep:
-          step.operation === "select_chain"
-            ? step.chain_to_keep?.trim().toUpperCase() || undefined
-            : undefined,
-        ligand_file_ids:
-          step.operation === "add_ligand"
-            ? (step.ligand_file_ids ?? []).filter(Boolean)
-            : undefined,
-      })),
+      steps: prepEdits,
     };
 
     prepMutation.mutate(payload);
   };
 
-  const addStep = (operation: SystemPrepStep["operation"]) => {
-    setSteps((prev) => [
-      ...prev,
-      { operation, ligand_to_remove: undefined, chain_to_keep: undefined, ligand_file_ids: [] },
-    ]);
+  const addEdit = (
+    operation: "select_chain" | "remove_ligand",
+    label: string,
+    step: { chain_to_keep?: string; ligand_to_remove?: string },
+  ) => {
+    setPrepEdits((prev) => [...prev, { operation, ...step }]);
   };
 
-  const removeStep = (index: number) => {
-    setSteps((prev) => prev.filter((_, i) => i !== index));
+  const removeEdit = (id: string) => {
+    setPrepEdits((prev) => prev.filter((_, i) => String(i) !== id));
   };
 
-  const updateStep = (index: number, field: keyof SystemPrepStep, value: any) => {
-    setSteps((prev) =>
-      prev.map((step, i) =>
-        i === index ? { ...step, [field]: value } : step
-      )
-    );
-  };
+  const clearEdits = () => setPrepEdits([]);
 
   const addLigandFile = (stepIndex: number, fileId: string) => {
-    setSteps((prev) =>
+    setPrepEdits((prev) =>
       prev.map((step, i) => {
         if (i !== stepIndex) return step;
         return {
@@ -402,7 +591,7 @@ export default function SystemPrepPage() {
   };
 
   const removeLigandFile = (stepIndex: number, fileIdToRemove: string) => {
-    setSteps((prev) =>
+    setPrepEdits((prev) =>
       prev.map((step, i) => {
         if (i !== stepIndex) return step;
         return {
@@ -416,12 +605,40 @@ export default function SystemPrepPage() {
   };
 
   const { data: prepJobs } = usePrepJobs();
+  const preparations = (prepJobs ?? []).filter(
+    (job) => job.type === "system_prep",
+  );
+
+  const inputInspect = useFileInspect(inputFile?.id ?? undefined, !!inputFile);
+
+  const editEntries = prepEdits.map((step, index) => ({
+    id: String(index),
+    operation: step.operation,
+    label:
+      step.operation === "select_chain"
+        ? "Keep chain " + step.chain_to_keep
+        : step.operation === "remove_ligand"
+          ? "Remove ligand " + step.ligand_to_remove
+          : step.operation === "add_ligand"
+            ? "Add " + step.ligand_file_ids?.length + " ligand(s)"
+            : step.operation,
+    residue_specs: [],
+  }));
 
   return (
-    <div className="mx-auto w-full max-w-[700px] px-4 py-6 sm:px-6 lg:px-8">
+    <div>
       <PageHeader
         title="System preparation"
-        description="Remove ligands, select chains, or add ligands to prepare a structure for MD simulation"
+        description="Select chains and ligands on the structure to prepare it for MD simulation"
+        actions={
+          <Button
+            variant="primary"
+            leadingIcon={<Plus className="size-4" />}
+            onClick={() => setFormOpen(true)}
+          >
+            New preparation
+          </Button>
+        }
       />
 
       {!capabilities && (
@@ -431,8 +648,10 @@ export default function SystemPrepPage() {
       )}
 
       {capabilities && (
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <Card>
+        <>
+          {formOpen && (
+            <form onSubmit={handleSubmit} className="space-y-6">
+          <Card className="max-w-[760px]">
             <CardBody className="p-6">
               <div className="space-y-5">
                 <div>
@@ -446,6 +665,7 @@ export default function SystemPrepPage() {
                         onClick={() => {
                           setInputFile(null);
                           setPdbId("");
+                          setPrepEdits([]);
                         }}
                         className="rounded-md p-1.5 text-faint transition hover:bg-ink/5 hover:text-ink"
                         title="Upload a file"
@@ -459,7 +679,11 @@ export default function SystemPrepPage() {
                         title="Upload a protein structure"
                         hint="PDB, CIF, or mmCIF structure to prepare"
                         onUploaded={setInputFile}
-                        onRemove={() => setInputFile(null)}
+                        onRemove={() => {
+                          setInputFile(null);
+                          setPdbId("");
+                          setPrepEdits([]);
+                        }}
                         disabled={isPrepping}
                       />
                     </div>
@@ -468,6 +692,8 @@ export default function SystemPrepPage() {
                         type="button"
                         onClick={() => {
                           setInputFile(null);
+                          setPdbId("");
+                          setPrepEdits([]);
                         }}
                         className="rounded-md p-1.5 text-faint transition hover:bg-ink/5 hover:text-ink"
                         title="Use a PDB ID"
@@ -492,247 +718,112 @@ export default function SystemPrepPage() {
                           placeholder="7YAE"
                         />
                       </Field>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (pdbId.length === 4) {
+                            fetchPdbMutation.mutate(pdbId);
+                          }
+                        }}
+                        disabled={
+                          fetchPdbMutation.isPending ||
+                          pdbId.length !== 4 ||
+                          isPrepping
+                        }
+                        className="rounded-md p-1.5 text-faint transition hover:bg-ink/5 hover:text-ink"
+                        title="Fetch PDB from RCSB"
+                      >
+                        {fetchPdbMutation.isPending ? (
+                          <Loader2 className="size-4" />
+                        ) : (
+                          <Plus className="size-4" />
+                        )}
+                      </button>
                     </div>
                   </div>
+
+                  {inputFile && (
+                    <div className="space-y-4">
+                      <StructurePreviewCard
+                        url={filePreviewUrl(inputFile.id)}
+                        file={inputFile}
+                        inspect={inputInspect.data ?? null}
+                        isLoading={inputInspect.isLoading}
+                      />
+                      {inputInspect.data && (
+                        <>
+                          <SelectionPanel
+                            inspect={inputInspect.data}
+                            onAddEdit={addEdit}
+                          />
+                          <EditStack
+                            entries={editEntries}
+                            onRemove={removeEdit}
+                            onClear={clearEdits}
+                          />
+                        </>
+                      )}
+                    </div>
+                  )}
                 </div>
 
-                <div>
-                  <p className="text-[13px] font-semibold text-ink mb-2">
-                    2. Preparation steps
-                  </p>
-                  <p className="text-[12.5px] text-muted">
-                    Steps run in order. Each step transforms the output of the previous step.
-                  </p>
-                  <div className="space-y-3">
-                    {steps.map((step, index) => {
-                      const op = OPERATIONS.find((o) => o.value === step.operation);
-                      return (
-                        <Card
-                          key={index}
-                          className="border-line p-4 sm:p-5"
-                        >
-                          <div className="flex items-start justify-between mb-3">
-                            <div className="flex items-center gap-2">
-                              <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">
-                                Step {index + 1}
-                              </span>
-                              <span className="text-[12px] font-medium text-ink">
-                                {op?.label}
-                              </span>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => removeStep(index)}
-                              className="rounded-md p-1.5 text-faint transition hover:bg-ink/5 hover:text-ink"
-                              title="Remove step"
-                            >
-                              <Minus className="size-4" />
-                            </button>
-                          </div>
-
-                          <Field
-                            label="Operation"
-                            hint="What to do in this step"
-                          >
-                            <Select
-                              value={step.operation}
-                              onChange={(event) => {
-                                const val = event.target.value as SystemPrepStep["operation"];
-                                updateStep(index, "operation", val);
-                              }}
-                              disabled={isPrepping}
-                            >
-                              {OPERATIONS.map((item) => (
-                                <option key={item.value} value={item.value}>
-                                  {item.label}
-                                </option>
-                              ))}
-                            </Select>
-                          </Field>
-
-                          {step.operation === "remove_ligand" && (
-                            <Field
-                              label="Ligand residue name"
-                              htmlFor={`remove-ligand-${index}`}
-                              hint="Three-letter residue code, e.g. CLR"
-                            >
-                              <input
-                                id={`remove-ligand-${index}`}
-                                type="text"
-                                maxLength={5}
-                                value={step.ligand_to_remove ?? ""}
-                                onChange={(event) =>
-                                  updateStep(
-                                    index,
-                                    "ligand_to_remove",
-                                    event.target.value
-                                  )
-                                }
-                                disabled={isPrepping}
-                                className="text-uppercase w-full"
-                                placeholder="CLR"
-                              />
-                            </Field>
-                          )}
-
-                          {step.operation === "select_chain" && (
-                            <Field
-                              label="Chain ID to keep"
-                              htmlFor={`select-chain-${index}`}
-                              hint="Single-character chain ID, e.g. A"
-                            >
-                              <input
-                                id={`select-chain-${index}`}
-                                type="text"
-                                maxLength={2}
-                                value={step.chain_to_keep ?? ""}
-                                onChange={(event) =>
-                                  updateStep(index, "chain_to_keep", event.target.value)
-                                }
-                                disabled={isPrepping}
-                                className="text-uppercase w-full"
-                                placeholder="A"
-                              />
-                            </Field>
-                          )}
-
-                          {step.operation === "add_ligand" && (
-                            <div className="space-y-3">
-                              <Field
-                                label="Ligand files"
-                                htmlFor={`add-ligand-${index}`}
-                                hint="SDF, MOL, or PDB ligand files to add"
-                              >
-                                <FileDropzone
-                                  file={null}
-                                  accept={[".sdf", ".mol", ".pdb", ".mol2"]}
-                                  maxBytes={50 * 1024 * 1024}
-                                  title="Upload ligand(s)"
-                                  hint="Select SDF/MOL/PDB ligand files"
-                                  onUploaded={(file) =>
-                                    addLigandFile(index, file.id)
-                                  }
-                                  disabled={isPrepping}
-                                />
-                                {(step.ligand_file_ids ?? []).length > 0 && (
-                                  <div className="space-y-1 mt-3">
-                                    {(step.ligand_file_ids ?? []).map(
-                                      (fileId, fileIndex) => (
-                                      <div
-                                        key={fileId}
-                                        className="flex items-center gap-2 px-2 py-1 rounded-md border border-line bg-surface"
-                                      >
-                                        <span className="text-[11px] text-muted">
-                                          Ligand {fileIndex + 1}
-                                        </span>
-                                        <button
-                                          type="button"
-                                          onClick={() =>
-                                            removeLigandFile(index, fileId)
-                                          }
-                                          className="rounded-md p-1 text-faint transition hover:bg-ink/5 hover:text-ink"
-                                        >
-                                          <Trash2 className="size-3.5" />
-                                        </button>
-                                      </div>
-                                    ))}
-                                  </div>
-                                )}
-                              </Field>
-                            </div>
-                          )}
-                        </Card>
-                      );
-                    })}
-                  </div>
-                  <div className="flex gap-2">
-                    {OPERATIONS.map((op) => (
-                      <button
-                        key={op.value}
-                        type="button"
-                        onClick={() => addStep(op.value)}
-                        disabled={isPrepping || steps.length >= 10}
-                        className="flex items-center gap-2 rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink transition hover:bg-brand-50 hover:text-brand-900"
-                      >
-                        <Plus className="size-4" /> {op.label}
-                      </button>
-                    ))}
-                  </div>
+                <div className="pt-4 flex justify-end">
+                  <Button
+                    type="submit"
+                    variant="primary"
+                    size="md"
+                    disabled={!canSubmit}
+                    loading={isPrepping}
+                    className="w-full sm:w-auto"
+                  >
+                    {isPrepping ? "Preparing\u2026" : "Start preparation"}
+                  </Button>
                 </div>
-              </div>
-
-              <div className="pt-4 flex justify-end">
-                <Button
-                  type="submit"
-                  variant="primary"
-                  disabled={!canSubmit}
-                  loading={isPrepping}
-                  className="w-full sm:w-auto"
-                >
-                  {isPrepping ? "Preparing…" : "Start preparation"}
-                </Button>
               </div>
             </CardBody>
           </Card>
-          {prepJobs && prepJobs.length > 0 && (
-            <Card>
-              <CardBody className="p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-[13px] font-semibold text-ink">
-                    Recent preparations
-                  </h3>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => queryClient.invalidateQueries({ queryKey: ["prep"] })}
-                  >
-                    Refresh
-                  </Button>
-                </div>
-                <div className="space-y-2">
-                  {prepJobs.slice(0, 5).map((job) => (
-                    <div
-                      key={job.id}
-                      className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-line bg-surface/50"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <p className="text-[12.5px] font-medium text-ink truncate">
-                          System preparation · {job.type}
-                        </p>
-                        <p className="text-[11px] text-faint">
-                          {job.status} ·
-                          {new Date(job.created_at).toLocaleString()}
-                        </p>
-                      </div>
-                      <span
-                        className={cn(
-                          "text-[11px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-md",
-                          job.status === "completed"
-                            ? "bg-emerald-50 text-emerald-700"
-                            : job.status === "failed"
-                              ? "bg-rose-50 text-rose-700"
-                              : job.status === "canceled"
-                                ? "bg-amber-50 text-amber-700"
-                                : "bg-brand-50 text-brand-700",
-                        )}
-                      >
-                        {job.status}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => navigate(`/prep/system-prep/${job.id}`)}
-                        className="rounded-md p-1.5 text-faint transition hover:bg-ink/5 hover:text-ink"
-                        title="View details"
-                      >
-                        <Globe2 className="size-3.5" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </CardBody>
-            </Card>
+            </form>
           )}
-        </form>
+
+          <Card className={formOpen ? "mt-6" : ""}>
+            <CardHeader
+              title="All preparations"
+              description="Every structure preparation in this workspace, newest first."
+              action={
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() =>
+                    queryClient.invalidateQueries({ queryKey: ["prep"] })}
+                >
+                  Refresh
+                </Button>
+              }
+            />
+            {preparations.length === 0 ? (
+              <EmptyState
+                icon={<Layers className="size-5" />}
+                title="No preparations yet"
+                description="Prepare a structure by removing ligands, keeping a chain, or adding ligands, then use the result to launch simulations."
+                action={
+                  <Button
+                    variant="primary"
+                    leadingIcon={<Plus className="size-4" />}
+                    onClick={() => setFormOpen(true)}
+                  >
+                    New preparation
+                  </Button>
+                }
+              />
+            ) : (
+              <div className="divide-y divide-line">
+                {preparations.map((job) => (
+                  <PrepJobRow key={job.id} job={job} />
+                ))}
+              </div>
+            )}
+          </Card>
+        </>
       )}
     </div>
   );

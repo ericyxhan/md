@@ -71,9 +71,15 @@ export interface Capabilities {
     rate_limit_requests_per_minute: number;
     max_name_length: number;
     max_stage_retries: number;
+    max_preview_bytes: number;
+    max_preview_atoms: number;
   };
   pdb_download_enabled: boolean;
   simulation_platform: string;
+  views: {
+    enabled: boolean;
+    max_view_atoms: number;
+  };
   prep_workflows: {
     membrane_embed: {
       enabled: boolean;
@@ -260,6 +266,96 @@ export interface LogTail {
   size_bytes: number;
 }
 
+// ---------------------------------------------------------------------------
+// Derived structure views
+// ---------------------------------------------------------------------------
+
+/** A single view file, fetchable through the artifact download route. */
+export interface ViewFile {
+  id: string;
+  name: string;
+  relative_path: string;
+  size_bytes: number;
+  url: string;
+}
+
+export interface ViewIonCount {
+  name: string;
+  count: number;
+}
+
+export interface ViewLigandCount {
+  name: string;
+  residues: number;
+}
+
+/**
+ * Composition summary the worker writes next to each view
+ * (`outputs/views/<group>/components.json`).
+ */
+export interface ViewManifest {
+  group: string;
+  source: string;
+  source_signature: number[];
+  generated_at: string;
+  source_atoms: number;
+  view_atoms: number;
+  truncated: boolean;
+  polymer_atoms: number;
+  ligand_atoms: number;
+  water_atoms: number;
+  water_residues: number;
+  ion_atoms: number;
+  ions: ViewIonCount[];
+  ligands: ViewLigandCount[];
+  box: {
+    a: number;
+    b: number;
+    c: number;
+    alpha: number;
+    beta: number;
+    gamma: number;
+  } | null;
+}
+
+export interface JobView {
+  group: string;
+  structure: ViewFile | null;
+  trajectory: ViewFile | null;
+  manifest: ViewFile | null;
+  manifest_data: ViewManifest | null;
+}
+
+export interface ViewList {
+  items: JobView[];
+}
+
+// ---------------------------------------------------------------------------
+// Analysis series
+// ---------------------------------------------------------------------------
+
+export interface SeriesPoint {
+  step: number;
+  time_ps?: number | null;
+  potential_energy_kj_mol?: number | null;
+  kinetic_energy_kj_mol?: number | null;
+  temperature_k?: number | null;
+  density_g_ml?: number | null;
+  volume_nm3?: number | null;
+  speed_ns_day?: number | null;
+  elapsed_s?: number | null;
+}
+
+export interface SeriesOut {
+  group: string;
+  source: string;
+  source_points: number;
+  view_points: number;
+  columns: string[];
+  points: SeriesPoint[];
+}
+
+
 export interface JobPlan {
   valid: boolean;
   config_toml: string;
@@ -319,27 +415,74 @@ export interface MembraneEmbedOut {
   error: string | null;
 }
 
+export type PrepStatus =
+  | "pending"
+  | "queued"
+  | "claimed"
+  | "running"
+  | "completed"
+  | "failed"
+  | "canceled";
+
 export interface PrepJobStatus {
   id: string;
   type: string;
-  status: "queued" | "claimed" | "running" | "completed" | "failed" | "canceled";
+  status: PrepStatus;
   created_at: string;
   completed_at?: string | null;
   output_file_ids: string[];
   error?: string | null;
   phase?: string | null;
   progress_percent?: number | null;
+  progress_message?: string | null;
   progress_updated_at?: string | null;
   cancel_requested?: boolean;
+  /** Friendly label derived server-side (e.g. "Membrane embedding · POPC"). */
+  label?: string;
 }
 
-export type SystemPrepOperation = "remove_ligand" | "select_chain" | "add_ligand";
+export type SystemPrepOperation =
+  | "remove_ligand"
+  | "select_chain"
+  | "add_ligand"
+  | "remove_residues"
+  | "keep_selection";
 
 export interface SystemPrepStep {
   operation: SystemPrepOperation;
   ligand_to_remove?: string | null;
   chain_to_keep?: string | null;
   ligand_file_ids?: string[];
+  residue_specs?: ResidueSpec[];
+}
+
+export interface ResidueSpec {
+  chain: string;
+  resnum: number;
+  icode?: string;
+}
+
+export interface ChainInfo {
+  residues: string[];
+  residue_count: number;
+  atom_count: number;
+}
+
+export interface FileInspect {
+  chains: Record<string, ChainInfo>;
+  ligands: string[];
+  components: {
+    protein: number;
+    water: number;
+    ion: number;
+    ligand: number;
+  };
+  atom_count: number;
+  model_count: number;
+  bounding_box: {
+    min: { x: number; y: number; z: number };
+    max: { x: number; y: number; z: number };
+  } | null;
 }
 
 export interface SystemPrepRequest {
@@ -360,3 +503,71 @@ export interface PDBInspection {
   chains: Record<string, string[]>;
   ligands: string[];
 }
+
+export interface EventOut {
+  id: number;
+  type: string;
+  message: string;
+  data: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface EventWithJobOut extends EventOut {
+  job_id: string;
+  job_name: string;
+  job_status: string;
+  /** "job" for MD simulations, "prep" for system-preparation jobs. */
+  source: "job" | "prep";
+  /** Prep job kind: "membrane_embed" | "system_prep" (null for MD jobs). */
+  prep_type?: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Workflows (base systems + derived simulation jobs)
+// ---------------------------------------------------------------------------
+
+export interface WorkflowCreate {
+  name: string;
+  source_file_id: string;
+  source_type: string;
+}
+
+export interface WorkflowJobSummary {
+  id: string;
+  name: string;
+  status: string;
+  phase: string | null;
+  progress: ProgressOut;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkflowOut {
+  id: string;
+  name: string;
+  source_file_id: string;
+  source_type: string;
+  job_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkflowDetailOut {
+  id: string;
+  name: string;
+  source_file_id: string;
+  source_type: string;
+  created_at: string;
+  updated_at: string;
+  jobs: WorkflowJobSummary[];
+}
+
+export interface WorkflowVariantsRequest {
+  count?: number;
+  name_template?: string;
+  parameterization?: ParameterizationSpec;
+  minimization?: MinimizationSpec;
+  equilibration?: StageSpec[];
+  production?: ProductionSpec;
+}
+

@@ -5,6 +5,12 @@
 #   docker build -t md-worker:local service/worker
 FROM openmm-cuda12:8.6.1
 
+# Shared contract values.  The worker runs unprivileged, so it needs a real
+# account with a home directory: the parameterizer resolves its cache
+# location from the home directory, and without one it tries to write to "/".
+ARG MD_SERVICE_UID=10001
+ARG MD_SERVICE_GID=10001
+
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1
@@ -23,5 +29,10 @@ COPY requirements.txt /tmp/worker-requirements.txt
 RUN python -m pip install -r /tmp/worker-requirements.txt
 
 COPY . /opt/worker
+
+RUN groupadd --gid ${MD_SERVICE_GID} mdservice \
+    && useradd --uid ${MD_SERVICE_UID} --gid ${MD_SERVICE_GID} --create-home --shell /usr/sbin/nologin mdservice
+
+ENV HOME=/home/mdservice
 
 CMD ["python", "-u", "worker.py"]

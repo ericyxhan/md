@@ -29,6 +29,20 @@ class PrepClient:
             timeout=timeout,
         )
 
+    @staticmethod
+    def _json(response: httpx.Response) -> Any:
+        """Decode a JSON body, falling back to text.
+
+        A proxy error page or a truncated body is not valid JSON; letting
+        ``json.JSONDecodeError`` escape would kill the worker because it is a
+        ``ValueError`` and not one of the errors the worker catches.
+        """
+
+        try:
+            return response.json()
+        except ValueError:
+            return response.text
+
     def claim_prep(self, payload: dict[str, Any]) -> dict[str, Any] | None:
         """Claim the oldest queued prep job.  None when the queue is empty."""
 
@@ -36,8 +50,8 @@ class PrepClient:
         if response.status_code == 204:
             return None
         if response.status_code >= 400:
-            raise PrepAPIError(response.status_code, response.json())
-        return response.json()
+            raise PrepAPIError(response.status_code, self._json(response))
+        return self._json(response)
 
     def progress(
         self, prep_job_id: str, payload: dict[str, Any]
@@ -48,8 +62,8 @@ class PrepClient:
             f"/internal/v1/prep/{prep_job_id}/progress", json=payload
         )
         if response.status_code >= 400:
-            raise PrepAPIError(response.status_code, response.json())
-        return response.json()
+            raise PrepAPIError(response.status_code, self._json(response))
+        return self._json(response)
 
     def finish(
         self, prep_job_id: str, payload: dict[str, Any]
@@ -60,16 +74,16 @@ class PrepClient:
             f"/internal/v1/prep/{prep_job_id}/finish", json=payload
         )
         if response.status_code >= 400:
-            raise PrepAPIError(response.status_code, response.json())
-        return response.json()
+            raise PrepAPIError(response.status_code, self._json(response))
+        return self._json(response)
 
     def heartbeat(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Send a prep worker heartbeat."""
 
         response = self._client.post("/internal/v1/prep/heartbeat", json=payload)
         if response.status_code >= 400:
-            raise PrepAPIError(response.status_code, response.json())
-        return response.json()
+            raise PrepAPIError(response.status_code, self._json(response))
+        return self._json(response)
 
     def close(self) -> None:
         self._client.close()

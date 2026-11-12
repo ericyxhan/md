@@ -29,6 +29,8 @@ ARTIFACT_KINDS = frozenset(
         "checkpoint",
         "trajectory",
         "structure",
+        "view",
+        "analysis",
         "metadata",
     }
 )
@@ -170,6 +172,10 @@ def artifact_kind(relative_path: str) -> str:
     pure = PurePosixPath(relative_path)
     name = pure.name.lower()
     suffix = pure.suffix.lower()
+    if len(pure.parts) >= 2 and pure.parts[0] == "outputs" and pure.parts[1] == "views":
+        return "view"
+    if len(pure.parts) >= 2 and pure.parts[0] == "outputs" and pure.parts[1] == "analysis":
+        return "analysis"
     if name == "config.toml":
         return "config"
     if suffix in _LOG_SUFFIXES:

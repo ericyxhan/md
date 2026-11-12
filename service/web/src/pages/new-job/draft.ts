@@ -7,6 +7,7 @@ import type {
   MinimizationSpec,
   ParameterizationSpec,
   StageSpec,
+  SystemPrepStep,
 } from "../../lib/types";
 
 export type PresetId = "quick" | "standard" | "production" | "custom";
@@ -36,6 +37,10 @@ export interface Draft {
   equilibration: StageDraft[];
   productionEnabled: boolean;
   production: StageDraft;
+  /** Pending structure edits built from the visual editor (V2 path 1). */
+  prepEdits: SystemPrepStep[];
+  /** Output file ID from a completed prep job, if edits were applied. */
+  prepOutputFileId: string | null;
 }
 
 let counter = 0;
@@ -156,6 +161,8 @@ export function createDraft(capabilities: Capabilities): Draft {
       equilibration: [],
       productionEnabled: true,
       production: makeStage({ durationNs: 10, barostat: true }),
+      prepEdits: [],
+      prepOutputFileId: null,
     },
     "standard",
   );
@@ -199,7 +206,9 @@ export function buildJobCreate(draft: Draft): JobCreate {
   if (draft.inputMode === "complex") {
     input = {
       mode: "complex",
-      complex_file_id: draft.complexFile?.id ?? null,
+      // If a prep job was run to apply edits, use its output file instead of
+      // the original upload.
+      complex_file_id: draft.prepOutputFileId ?? draft.complexFile?.id ?? null,
     };
   } else if (draft.inputMode === "protein_ligands") {
     input = {
@@ -256,6 +265,22 @@ export function validateDraft(draft: Draft): StepIssue[] {
   }
   if (draft.inputMode === "complex" && !draft.complexFile) {
     issues.push({ step: 0, message: "Upload a protein–ligand complex file." });
+  }
+
+  // Validate prep edits reference valid operations.
+  for (const edit of draft.prepEdits) {
+    if (edit.operation === "select_chain" && !edit.chain_to_keep) {
+      issues.push({
+        step: 0,
+        message: "Chain selection requires a chain to keep.",
+      });
+    }
+    if (edit.operation === "remove_ligand" && !edit.ligand_to_remove) {
+      issues.push({
+        step: 0,
+        message: "Ligand removal requires a ligand to remove.",
+      });
+    }
   }
   if (draft.inputMode === "protein_ligands") {
     if (!draft.proteinFile) {

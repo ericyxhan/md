@@ -1,6 +1,52 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
-import type { Job, JobStatus, StageStatus } from "./types";
+import type { Job, JobStatus, PrepStatus, StageStatus } from "./types";
+
+/** Mol* built-in structure formats, keyed by upload suffix. */
+export type ViewerStructureFormat =
+  | "pdb"
+  | "mmcif"
+  | "gro"
+  | "xyz"
+  | "mol"
+  | "sdf"
+  | "mol2";
+
+const VIEWER_FORMATS_BY_SUFFIX: Record<string, ViewerStructureFormat> = {
+  pdb: "pdb",
+  ent: "pdb",
+  cif: "mmcif",
+  mmcif: "mmcif",
+  gro: "gro",
+  xyz: "xyz",
+  mol: "mol",
+  sdf: "sdf",
+  sd: "sdf",
+  mol2: "mol2",
+};
+
+/** Map an uploaded structure filename to the viewer format id, if renderable. */
+export function structureFormat(fileName: string): ViewerStructureFormat | null {
+  const suffix = fileName.includes(".")
+    ? fileName.split(".").pop()!.toLowerCase()
+    : "";
+  return VIEWER_FORMATS_BY_SUFFIX[suffix] ?? null;
+}
+
+/**
+ * Map a response content type to the viewer format id.
+ *
+ * A derived preview is always served as PDB whatever the source format was,
+ * so the viewer asks the server instead of trusting the file name.
+ */
+export function structureFormatFromContentType(
+  contentType: string,
+): ViewerStructureFormat | null {
+  const type = contentType.toLowerCase();
+  if (type.includes("x-pdb")) return "pdb";
+  if (type.includes("x-cif")) return "mmcif";
+  return null;
+}
 
 export function cn(...inputs: ClassValue[]): string {
   return twMerge(clsx(inputs));
@@ -105,7 +151,25 @@ export function isActive(status: JobStatus | undefined): boolean {
   return status ? ACTIVE_STATUSES.includes(status) : false;
 }
 
-export function isTerminal(status: JobStatus | undefined): boolean {
+/**
+ * Prep jobs use their own status vocabulary.  A claimed job is already
+ * picked up by a worker, so it is still active even though it is not
+ * "running" yet.
+ */
+export const ACTIVE_PREP_STATUSES: PrepStatus[] = [
+  "pending",
+  "queued",
+  "claimed",
+  "running",
+];
+
+export function isPrepActive(status: PrepStatus | undefined): boolean {
+  return status ? ACTIVE_PREP_STATUSES.includes(status) : false;
+}
+
+export function isTerminal(
+  status: JobStatus | PrepStatus | undefined,
+): boolean {
   return (
     status === "completed" || status === "failed" || status === "canceled"
   );

@@ -34,7 +34,10 @@ docking, free-energy calculations, and property prediction without a redesign.
 
 - Multi-tenant user management, per-user accounts, or role-based access.
 - Editing or re-uploading files inside an existing job.
-- A molecule viewer, trajectory player, or plotting suite.
+- ~~A molecule viewer, trajectory player, or plotting suite.~~ Retired as a
+  non-goal: see `docs/interactive-visualization-design.md` for the interactive
+  and visual layer (structure viewing and editing, live monitoring charts,
+  trajectory playback, checkpoint inspection) that builds on this design.
 - Admin settings UI (queue limits, retention, and worker identity stay in
   environment configuration).
 - Replacing machine API access: scripts continue to use bearer tokens.
@@ -178,7 +181,13 @@ Flow:
 3. **Submit** — `POST /api/v1/prep/membrane` queues a prep job and returns
    immediately.
 4. **Poll** — the page polls `GET /api/v1/prep/jobs/{id}` every 3 seconds
-   until the job reaches `completed` or `failed`.
+   until the job reaches `completed` or `failed`. The response carries
+   `phase`, `progress_percent`, and `progress_message`; for membrane
+   embedding the worker parses packmol’s log and reports the block and
+   loop it is on (for example `packing WAT.pdb (block 5/9, loop 3/20)`).
+   Packing a solvated bilayer moves ~80k molecules and can take many
+   minutes, so the progress detail matters: a bare “running” status gives
+   the user no way to tell work from a hang.
 5. **Use** — on completion, the embedded PDB and topology (PSF) are registered
    as files. A “Use embedded system in simulation” button deep-links to the
    new-job wizard with the embedded PDB pre-selected as the complex file.
@@ -401,6 +410,11 @@ badge. That keeps the promise visible without shipping dead ends.
 | Cancel / retry | `POST /api/v1/jobs/{id}/cancel`, `/retry` |
 | Artifacts | `GET /api/v1/jobs/{id}/artifacts[/{artifact_id}]` |
 | Logs | `GET /api/v1/jobs/{id}/logs`, tail, download |
+| Account-wide activity feed | `GET /api/v1/jobs/events` |
+| Workflows (base systems) | `GET`, `POST /api/v1/workflows`; `GET /api/v1/workflows/{id}` |
+| Launch workflow variants | `POST /api/v1/workflows/{id}/variants` |
+| System preparation | `POST /api/v1/prep/system-prep`; `GET /api/v1/prep/jobs/{id}` |
+| Membrane embedding | `POST /api/v1/prep/membrane`; `GET /api/v1/prep/jobs/{id}` |
 
 Wire types mirror `service/api/app/schemas.py` and live in
 `src/lib/types.ts`. When the contract changes, update both sides together.
@@ -523,6 +537,11 @@ npm run dev
 - Docking and free-energy workflows behind the same job shell
 - Cross-workflow search and a unified activity feed
 - Admin panel for queue limits, retention, and worker status
+- Interactive visualization layer — structure viewer with selection-driven
+  editing, derived trajectory views and playback, live monitoring charts, and
+  checkpoint inspection; see `docs/interactive-visualization-design.md` for
+  the phased plan (V1 viewer foundation → V2 visual builder → V3 analysis
+  and playback → V4 live views)
 
 ### Phase 4 — collaboration
 

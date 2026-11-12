@@ -74,9 +74,15 @@ def capabilities(
             ),
             "max_name_length": 200,
             "max_stage_retries": 3,
+            "max_preview_bytes": settings.max_preview_bytes,
+            "max_preview_atoms": settings.max_preview_atoms,
         },
         "pdb_download_enabled": settings.allow_pdb_download,
         "simulation_platform": settings.simulation_platform,
+        "views": {
+            "enabled": settings.views_enabled,
+            "max_view_atoms": 25_000,
+        },
         "prep_workflows": {
             "membrane_embed": {
                 "enabled": bool(settings.packmol_path),

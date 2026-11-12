@@ -7,4 +7,4 @@ pydantic-settings==2.16.2
 tomli-w==1.2.0
 python-multipart==0.0.33
 httpx==0.28.1
-biopython==1.85
+gemmi==0.7.5

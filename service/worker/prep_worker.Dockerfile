@@ -3,6 +3,14 @@
 #   docker build -f service/worker/prep_worker.Dockerfile -t md-prep-worker:local .
 FROM python:3.12-slim
 
+# Shared contract values, the same ones the API uses.  The prep worker writes
+# into the same data volume as the API, so it has to run as the same account:
+# two different accounts produce files the other cannot read, and a backup
+# misses the difference.  Compose passes these from service/contract.env.
+ARG MD_SERVICE_UID=10001
+ARG MD_SERVICE_GID=10001
+ARG MD_API_PORT=8000
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
@@ -29,15 +37,15 @@ RUN python -m pip install --upgrade pip \
     && chmod +x /opt/worker/packmol-memgen-wrapper
 ENV PYTHONPATH=/opt/worker
 
-RUN groupadd --gid 10002 mdprep \
-    && useradd --uid 10002 --gid 10002 --create-home --shell /usr/sbin/nologin mdprep \
+RUN groupadd --gid ${MD_SERVICE_GID} mdprep \
+    && useradd --uid ${MD_SERVICE_UID} --gid ${MD_SERVICE_GID} --create-home --shell /usr/sbin/nologin mdprep \
     && mkdir -p /home/mdprep \
-    && chown -R 10002:10002 /home/mdprep
+    && chown -R ${MD_SERVICE_UID}:${MD_SERVICE_GID} /home/mdprep /opt/worker
 
 ENV HOME=/home/mdprep
 
-USER 10002:10002
+USER ${MD_SERVICE_UID}:${MD_SERVICE_GID}
 
-EXPOSE 8000
+EXPOSE ${MD_API_PORT}
 
 CMD ["python", "-u", "prep_worker.py"]

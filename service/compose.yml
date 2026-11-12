@@ -5,14 +5,18 @@ services:
     build:
       context: ..
       dockerfile: service/api/Dockerfile
+      args:
+        MD_SERVICE_UID: ${MD_SERVICE_UID:-10001}
+        MD_SERVICE_GID: ${MD_SERVICE_GID:-10001}
+        MD_API_PORT: ${MD_API_PORT:-8000}
     image: md-api:local
     command: ["alembic", "upgrade", "head"]
     environment:
-      DATABASE_URL: sqlite:////db/app.db
-      DATA_ROOT: /data
+      DATABASE_URL: sqlite:///${MD_DB_MOUNT:-/db}/app.db
+      DATA_ROOT: ${MD_DATA_MOUNT:-/data}
     volumes:
-      - ${HOST_DB_DIR:-/srv/md-service/db}:/db
-      - ${HOST_DATA_DIR:-/srv/md-service/data}:/data
+      - ${HOST_DB_DIR:-/srv/md-service/db}:${MD_DB_MOUNT:-/db}
+      - ${HOST_DATA_DIR:-/srv/md-service/data}:${MD_DATA_MOUNT:-/data}
     restart: "no"
 
   api:
@@ -20,19 +24,29 @@ services:
     build:
       context: ..
       dockerfile: service/api/Dockerfile
+      args:
+        MD_SERVICE_UID: ${MD_SERVICE_UID:-10001}
+        MD_SERVICE_GID: ${MD_SERVICE_GID:-10001}
+        MD_API_PORT: ${MD_API_PORT:-8000}
     command:
       - uvicorn
       - app.main:app
       - --host
       - 0.0.0.0
       - --port
-      - "8000"
+      - "${MD_API_PORT:-8000}"
       - --workers
       - "1"
       - --no-access-log
+      # Caddy sits in front of the API and rewrites X-Forwarded-For to the
+      # client address it resolved.  Trusting it keeps request.client and the
+      # per-IP rate limiter correct behind the public tunnel.
+      - --proxy-headers
+      - --forwarded-allow-ips
+      - "*"
     environment:
-      DATABASE_URL: sqlite:////db/app.db
-      DATA_ROOT: /data
+      DATABASE_URL: sqlite:///${MD_DB_MOUNT:-/db}/app.db
+      DATA_ROOT: ${MD_DATA_MOUNT:-/data}
       SERVICE_API_TOKEN: ${SERVICE_API_TOKEN:?set SERVICE_API_TOKEN}
       WORKER_TOKEN: ${WORKER_TOKEN:?set WORKER_TOKEN}
       WEB_PASSWORD: ${WEB_PASSWORD:-}
@@ -42,6 +56,7 @@ services:
       WEB_COOKIE_SECURE: ${WEB_COOKIE_SECURE:-true}
       WEB_LOGIN_ATTEMPTS_PER_MINUTE: ${WEB_LOGIN_ATTEMPTS_PER_MINUTE:-10}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
+      TRUST_FORWARDED_FOR: ${TRUST_FORWARDED_FOR:-true}
       SIMULATION_PLATFORM: ${SIMULATION_PLATFORM:-CUDA}
       ALLOW_PDB_DOWNLOAD: ${ALLOW_PDB_DOWNLOAD:-true}
       DOCS_ENABLED: ${DOCS_ENABLED:-true}
@@ -51,6 +66,7 @@ services:
       WORKER_HEARTBEAT_INTERVAL_SECONDS: ${WORKER_HEARTBEAT_INTERVAL_SECONDS:-10}
       REAPER_INTERVAL_SECONDS: ${REAPER_INTERVAL_SECONDS:-10}
       MAX_QUEUED_JOBS_PER_OWNER: ${MAX_QUEUED_JOBS_PER_OWNER:-5}
+      MAX_UPLOAD_ATOMS: ${MAX_UPLOAD_ATOMS:-250000}
       MIN_FREE_DISK_BYTES: ${MIN_FREE_DISK_BYTES:-536870912}
       RETENTION_DAYS: ${RETENTION_DAYS:-0}
       ORPHAN_WORKSPACE_HOURS: ${ORPHAN_WORKSPACE_HOURS:-24}
@@ -69,20 +85,32 @@ services:
       PREP_CANCEL_TERM_SECONDS: ${PREP_CANCEL_TERM_SECONDS:-10}
       PREP_REQUEST_TIMEOUT_SECONDS: ${PREP_REQUEST_TIMEOUT_SECONDS:-30}
     volumes:
-      - ${HOST_DB_DIR:-/srv/md-service/db}:/db
-      - ${HOST_DATA_DIR:-/srv/md-service/data}:/data
+      - ${HOST_DB_DIR:-/srv/md-service/db}:${MD_DB_MOUNT:-/db}
+      - ${HOST_DATA_DIR:-/srv/md-service/data}:${MD_DATA_MOUNT:-/data}
     depends_on:
       migrate:
         condition: service_completed_successfully
     restart: unless-stopped
+    # The API parses user-supplied structure files, so it runs with the least
+    # privilege it can: no capabilities, no way to gain more, and a read-only
+    # filesystem.  The two writable paths are the mounted volumes and /tmp.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    pids_limit: 256
+    mem_limit: 2g
     expose:
-      - "8000"
+      - "${MD_API_PORT:-8000}"
     healthcheck:
       test:
         - CMD
         - python
         - -c
-        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:${MD_API_PORT:-8000}/healthz')
       interval: 15s
       timeout: 5s
       retries: 5
@@ -93,15 +121,19 @@ services:
       context: ./worker
       dockerfile: Dockerfile
     environment:
-      API_URL: http://api:8000
+      API_URL: http://api:${MD_API_PORT:-8000}
       WORKER_TOKEN: ${WORKER_TOKEN:?set WORKER_TOKEN}
       WORKER_ID: ${WORKER_ID:-gpu-0}
       WORKER_HOSTNAME: ${WORKER_HOSTNAME:-}
       WORKER_GPU_NAME: ${WORKER_GPU_NAME:-}
       WORKER_GPU_UUID: ${WORKER_GPU_UUID:-}
-      DATA_ROOT: /data
+      DATA_ROOT: ${MD_DATA_MOUNT:-/data}
       CUDA_VISIBLE_DEVICES: ${CUDA_VISIBLE_DEVICES:-0}
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      # The OpenFF parameterizer resolves its cache from the home directory.
+      # Point it at the shared data volume so the cached charge models
+      # survive a restart and are not re-fetched.
+      XDG_CACHE_HOME: ${MD_DATA_MOUNT:-/data}/cache
       SIMULATE_PATH: /app/simulate.py
       SIMULATE_CWD: /app
       WORKER_POLL_SECONDS: ${WORKER_POLL_SECONDS:-2}
@@ -113,24 +145,42 @@ services:
       WORKER_REQUEST_TIMEOUT_SECONDS: ${WORKER_REQUEST_TIMEOUT_SECONDS:-30}
       WORKER_MAX_ARTIFACTS: ${WORKER_MAX_ARTIFACTS:-2000}
     volumes:
-      - ${HOST_DATA_DIR:-/srv/md-service/data}:/data
+      - ${HOST_DATA_DIR:-/srv/md-service/data}:${MD_DATA_MOUNT:-/data}
     depends_on:
       api:
         condition: service_healthy
     gpus: all
     restart: unless-stopped
+    # The worker executes OpenMM on structures the user uploaded, so it runs
+    # as the unprivileged service account with no capabilities and no way to
+    # gain more.  It keeps network access because it polls the API for jobs;
+    # the simulation itself reaches nothing.
+    user: "${MD_SERVICE_UID:-10001}:${MD_SERVICE_GID:-10001}"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 512
+    mem_limit: 16g
 
   prep-worker:
     image: md-prep-worker:local
     build:
       context: ./worker
       dockerfile: prep_worker.Dockerfile
+      args:
+        # The prep worker shares the data volume with the API, so it runs as
+        # the same account.  Two accounts mean files the other cannot read.
+        MD_SERVICE_UID: ${MD_SERVICE_UID:-10001}
+        MD_SERVICE_GID: ${MD_SERVICE_GID:-10001}
+        MD_API_PORT: ${MD_API_PORT:-8000}
     environment:
-      API_URL: http://api:8000
+      API_URL: http://api:${MD_API_PORT:-8000}
       WORKER_TOKEN: ${WORKER_TOKEN:?set WORKER_TOKEN}
       WORKER_ID: ${PREP_WORKER_ID:-prep-0}
       WORKER_HOSTNAME: ${PREP_WORKER_HOSTNAME:-}
       PACKMOL_PATH: /opt/worker/packmol-memgen-wrapper
+      XDG_CACHE_HOME: ${MD_DATA_MOUNT:-/data}/cache
       WORKER_POLL_SECONDS: ${PREP_POLL_SECONDS:-2}
       WORKER_HEARTBEAT_SECONDS: ${PREP_HEARTBEAT_SECONDS:-10}
       WORKER_PROGRESS_POLL_SECONDS: ${PREP_PROGRESS_POLL_SECONDS:-2}
@@ -139,28 +189,50 @@ services:
       WORKER_CANCEL_TERM_SECONDS: ${PREP_CANCEL_TERM_SECONDS:-10}
       WORKER_REQUEST_TIMEOUT_SECONDS: ${PREP_REQUEST_TIMEOUT_SECONDS:-30}
     volumes:
-      - ${HOST_DATA_DIR:-/srv/md-service/data}:/data
+      - ${HOST_DATA_DIR:-/srv/md-service/data}:${MD_DATA_MOUNT:-/data}
     depends_on:
       api:
         condition: service_healthy
     restart: unless-stopped
+    # The prep worker runs packmol-memgen on user-supplied structures.  It
+    # gets the same treatment as the simulation worker.
+    user: "${MD_SERVICE_UID:-10001}:${MD_SERVICE_GID:-10001}"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 8g
 
   web:
     image: md-web:local
     build:
       context: ./web
       dockerfile: Dockerfile
+      args:
+        MD_WEB_PORT: ${MD_WEB_PORT:-80}
+    environment:
+      # nginx reads its listen port from this; see web/nginx.conf.
+      MD_WEB_PORT: ${MD_WEB_PORT:-80}
+      # Only substitute the contract variables, never nginx's own runtime
+      # variables such as $host.
+      NGINX_ENVSUBST_FILTER: ^MD_
     expose:
-      - "80"
+      - "${MD_WEB_PORT:-80}"
     restart: unless-stopped
 
   caddy:
     image: caddy:2
     ports:
-      - "80:80"
-      - "443:443"
+      # Loopback only.  Tailscale Funnel terminates TLS and forwards to this
+      # port; nothing should reach Caddy directly from the network.
+      - "127.0.0.1:${MD_EDGE_PORT:-8080}:${MD_EDGE_PORT:-8080}"
     environment:
-      MD_SERVICE_DOMAIN: ${MD_SERVICE_DOMAIN:-localhost}
+      # The Caddyfile resolves its listen port and upstream ports from these.
+      MD_EDGE_PORT: ${MD_EDGE_PORT:-8080}
+      MD_API_PORT: ${MD_API_PORT:-8000}
+      MD_WEB_PORT: ${MD_WEB_PORT:-80}
+      MD_INTERNAL_PREFIX: ${MD_INTERNAL_PREFIX:-/internal/v1}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

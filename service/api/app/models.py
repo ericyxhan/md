@@ -27,6 +27,10 @@ class Job(Base):
         Index("ix_jobs_worker_id", "worker_id"),
         Index("ix_jobs_lease_expires_at", "lease_expires_at"),
         Index("ix_jobs_owner_created_at", "owner_id", "created_at"),
+        # Created by migration 0005; declared here so the model and the
+        # migrated schema agree (otherwise ``alembic --autogenerate`` would
+        # propose dropping it).
+        Index("ix_jobs_workflow_id", "workflow_id"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -63,6 +67,8 @@ class Job(Base):
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     exit_code: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
+    workflow_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+
     created_at: Mapped[str] = mapped_column(String(32), nullable=False)
     updated_at: Mapped[str] = mapped_column(String(32), nullable=False)
     queued_at: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
@@ -78,6 +84,29 @@ class Job(Base):
         back_populates="job",
         cascade="all, delete-orphan",
     )
+
+
+class Workflow(Base):
+    """A named base system (prepared or embedded structure) with derived jobs.
+
+    Workflows group together simulations that share a common input structure,
+    for example a membrane-embedded protein and the eight production replicates
+    launched from it.  A workflow is created from a completed prep job's output
+    file; child jobs reference it through ``workflow_id``.
+    """
+
+    __tablename__ = "workflows"
+    __table_args__ = (
+        Index("ix_workflows_owner_created_at", "owner_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    source_file_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[str] = mapped_column(String(32), nullable=False)
+    updated_at: Mapped[str] = mapped_column(String(32), nullable=False)
 
 
 class JobStage(Base):
@@ -153,7 +182,12 @@ class Artifact(Base):
 
 class JobEvent(Base):
     __tablename__ = "job_events"
-    __table_args__ = (Index("ix_job_events_job_id_id", "job_id", "id"),)
+    __table_args__ = (
+        Index("ix_job_events_job_id_id", "job_id", "id"),
+        # The account-wide activity feed reads the newest events across all
+        # jobs; without this index the feed sorts the whole event history.
+        Index("ix_job_events_created_at", "created_at"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     job_id: Mapped[str] = mapped_column(
@@ -238,9 +272,50 @@ class PrepJob(Base):
     output_file_ids: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     phase: Mapped[Optional[str]] = mapped_column(String(24), nullable=True)
     progress_percent: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    progress_message: Mapped[Optional[str]] = mapped_column(
+        String(1000), nullable=True
+    )
     progress_updated_at: Mapped[Optional[str]] = mapped_column(
         String(32), nullable=True
     )
     created_at: Mapped[str] = mapped_column(String(32), nullable=False)
     updated_at: Mapped[str] = mapped_column(String(32), nullable=False)
     completed_at: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+
+    events: Mapped[list["PrepEvent"]] = relationship(
+        back_populates="prep_job",
+        cascade="all, delete-orphan",
+        order_by="PrepEvent.id",
+    )
+
+
+class PrepEvent(Base):
+    """Append-only event log for system-preparation jobs.
+
+    Prep jobs (membrane embedding, structure editing) are not MD jobs, so
+    their activity cannot live in ``job_events`` — that table is keyed by
+    ``jobs.id``.  This table mirrors it for prep jobs so the account-wide
+    activity feed can show both.
+    """
+
+    __tablename__ = "prep_events"
+    __table_args__ = (
+        Index("ix_prep_events_prep_job_id_id", "prep_job_id", "id"),
+        Index("ix_prep_events_created_at", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    prep_job_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("prep_jobs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    type: Mapped[str] = mapped_column(String(64), nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    data_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[str] = mapped_column(String(32), nullable=False)
+
+    # The relationship is what makes SQLAlchemy insert the parent row before
+    # this one; a bare ForeignKey column is not enough once the database
+    # enforces referential integrity.
+    prep_job: Mapped["PrepJob"] = relationship(back_populates="events")

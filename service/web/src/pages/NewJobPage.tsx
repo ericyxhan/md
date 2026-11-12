@@ -12,8 +12,14 @@ import {
   Sparkles,
 } from "lucide-react";
 import type { Capabilities, FileOut, JobCreate, JobPlan } from "../lib/types";
-import { ApiError, createJob, getFile, validateJob } from "../lib/api";
-import { useCapabilities } from "../lib/queries";
+import {
+  ApiError,
+  createJob,
+  getFile,
+  requestSystemPrep,
+  validateJob,
+} from "../lib/api";
+import { useCapabilities, usePrepJob } from "../lib/queries";
 import { useToast } from "../components/ui/Toast";
 import { PageHeader } from "../components/layout/PageHeader";
 import { Button } from "../components/ui/Button";
@@ -229,6 +235,55 @@ function Wizard({
     unknown
   > | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // Prep job orchestration for V2 visual editing (path 1: no API change).
+  const [prepJobId, setPrepJobId] = useState<string | null>(null);
+  const [prepSubmitting, setPrepSubmitting] = useState(false);
+
+  const prepJob = usePrepJob(prepJobId ?? undefined);
+
+  // When a prep job completes, apply its output file as the structure input
+  // and advance to the next wizard step.
+  useEffect(() => {
+    if (
+      prepJob.data?.status === "completed" &&
+      prepJob.data.output_file_ids.length > 0 &&
+      draft.prepEdits.length > 0
+    ) {
+      const outputFileId = prepJob.data.output_file_ids[0];
+      setDraft((current) => ({
+        ...current,
+        prepOutputFileId: outputFileId,
+      }));
+      setPrepSubmitting(false);
+      setStep((current) => Math.min(current + 1, STEPS.length - 1));
+    }
+    if (prepJob.data?.status === "failed") {
+      setPrepSubmitting(false);
+      setSubmitError(
+        prepJob.data.error ?? "Structure preparation failed.",
+      );
+    }
+  }, [prepJob.data, draft.prepEdits.length]);
+
+  const runPrep = async () => {
+    setSubmitError(null);
+    setPrepSubmitting(true);
+    try {
+      const result = await requestSystemPrep({
+        name: draft.name.trim() || "Untitled preparation",
+        input_file_id: draft.complexFile?.id ?? draft.proteinFile?.id ?? null,
+        steps: draft.prepEdits,
+      });
+      setPrepJobId(result.prep_job_id);
+    } catch (error) {
+      setPrepSubmitting(false);
+      setSubmitError(
+        error instanceof ApiError
+          ? error.message
+          : "Could not queue structure preparation.",
+      );
+    }
+  };
 
   // If arriving from a prep job, pre-select the embedded file as the complex.
   useEffect(() => {
@@ -308,6 +363,12 @@ function Wizard({
     if (step === 2) {
       setStep(3);
       runValidation();
+      return;
+    }
+    // On the structure step, if the user built an edit stack, queue a prep
+    // job first. The prep completion handler advances the wizard.
+    if (step === 0 && draft.prepEdits.length > 0 && !prepJobId) {
+      void runPrep();
       return;
     }
     setStep((current) => Math.min(current + 1, STEPS.length - 1));
@@ -436,10 +497,11 @@ function Wizard({
                     variant="primary"
                     size="md"
                     onClick={goNext}
-                    disabled={!canContinue}
+                    disabled={!canContinue || prepSubmitting}
+                    loading={prepSubmitting}
                     trailingIcon={<ArrowRight className="size-4" />}
                   >
-                    {step === 2 ? "Review plan" : "Continue"}
+                    {prepSubmitting ? "Preparing structure…" : step === 2 ? "Review plan" : "Continue"}
                   </Button>
                 ) : (
                   <Button

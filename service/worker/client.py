@@ -43,41 +43,59 @@ class WorkerClient:
     def __exit__(self, *_exc: object) -> None:
         self.close()
 
+    @staticmethod
+    def _json(response: httpx.Response) -> Any:
+        """Decode a JSON body, falling back to text.
+
+        A proxy error page or a truncated body is not valid JSON.  Letting
+        ``json.JSONDecodeError`` escape would kill the worker, because it is
+        a ``ValueError`` and not one of the errors the worker catches.
+        """
+
+        try:
+            return response.json()
+        except ValueError:
+            return response.text
+
     def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         response = self._client.request(method, path, **kwargs)
         if response.status_code >= 400:
-            try:
-                body = response.json()
-            except ValueError:
-                body = response.text
-            raise WorkerAPIError(response.status_code, body)
+            raise WorkerAPIError(response.status_code, self._json(response))
         return response
 
     def health(self) -> dict[str, Any]:
-        return self._request("GET", "/healthz").json()
+        return self._json(self._request("GET", "/healthz"))
 
     def heartbeat(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._request(
-            "POST", "/internal/v1/workers/heartbeat", json=payload
-        ).json()
+        return self._json(
+            self._request(
+                "POST", "/internal/v1/workers/heartbeat", json=payload
+            )
+        )
 
     def claim(self, payload: dict[str, Any]) -> dict[str, Any] | None:
         response = self._request("POST", "/internal/v1/jobs/claim", json=payload)
         if response.status_code == 204:
             return None
-        return response.json()
+        return self._json(response)
 
     def progress(self, job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._request(
-            "POST", f"/internal/v1/jobs/{job_id}/progress", json=payload
-        ).json()
+        return self._json(
+            self._request(
+                "POST", f"/internal/v1/jobs/{job_id}/progress", json=payload
+            )
+        )
 
     def stage(self, job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._request(
-            "POST", f"/internal/v1/jobs/{job_id}/stage", json=payload
-        ).json()
+        return self._json(
+            self._request(
+                "POST", f"/internal/v1/jobs/{job_id}/stage", json=payload
+            )
+        )
 
     def finish(self, job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._request(
-            "POST", f"/internal/v1/jobs/{job_id}/finish", json=payload
-        ).json()
+        return self._json(
+            self._request(
+                "POST", f"/internal/v1/jobs/{job_id}/finish", json=payload
+            )
+        )
