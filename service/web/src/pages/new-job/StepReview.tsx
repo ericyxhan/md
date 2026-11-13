@@ -210,6 +210,7 @@ export function StepReview({
             label="Temperature"
             value={`${draft.equilibration[0]?.temperatureK ?? draft.production.temperatureK} K`}
           />
+          <Row label="Precision" value={draft.precision === "mixed" ? "Mixed (default)" : draft.precision[0].toUpperCase() + draft.precision.slice(1)} />
         </SummaryCard>
 
         <SummaryCard icon={<Clock3 className="size-3.5" />} title="Estimated run">

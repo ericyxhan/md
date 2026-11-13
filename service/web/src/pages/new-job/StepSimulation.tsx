@@ -38,6 +38,12 @@ const INTEGRATOR_LABELS: Record<string, string> = {
   nose_hoover: "Nosé–Hoover",
 };
 
+const PRECISION_LABELS: Record<string, string> = {
+  mixed: "Mixed (default, fastest)",
+  single: "Single",
+  double: "Double (most robust)",
+};
+
 function IntegratorFields({
   stage,
   onChange,
@@ -355,6 +361,33 @@ export function StepSimulation({
               />
             </Field>
           </div>
+        ) : null}
+      </div>
+
+      <div className="rounded-xl border border-line bg-surface px-4 py-3.5">
+        <Field
+          label="Simulation precision"
+          hint="Double precision eliminates rare NaN coordinate failures on older GPUs at the cost of slower runs."
+        >
+          <Select
+            value={draft.precision}
+            onChange={(event) =>
+              onChange({ ...draft, precision: event.target.value as Draft["precision"] })
+            }
+          >
+            {capabilities.precisions.map((precision) => (
+              <option key={precision} value={precision}>
+                {PRECISION_LABELS[precision] ?? precision}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        {draft.precision === "double" ? (
+          <p className="mt-2 rounded-lg bg-emerald-50 px-3 py-2 text-[11.5px] leading-relaxed text-emerald-800 ring-1 ring-inset ring-emerald-200/70">
+            Double precision selected. Forces and trajectories are computed
+            in 64-bit arithmetic, which prevents the occasional numerical
+            overflow that mixed precision exhibits on older GPUs.
+          </p>
         ) : null}
       </div>
 

@@ -6,6 +6,7 @@ import type {
   JobCreate,
   MinimizationSpec,
   ParameterizationSpec,
+  Precision,
   StageSpec,
   SystemPrepStep,
 } from "../../lib/types";
@@ -41,6 +42,8 @@ export interface Draft {
   prepEdits: SystemPrepStep[];
   /** Output file ID from a completed prep job, if edits were applied. */
   prepOutputFileId: string | null;
+  /** Simulation precision for the whole run. */
+  precision: Precision;
 }
 
 let counter = 0;
@@ -163,6 +166,7 @@ export function createDraft(capabilities: Capabilities): Draft {
       production: makeStage({ durationNs: 10, barostat: true }),
       prepEdits: [],
       prepOutputFileId: null,
+      precision: "mixed",
     },
     "standard",
   );
@@ -228,6 +232,7 @@ export function buildJobCreate(draft: Draft): JobCreate {
     input,
     parameterization: draft.parameterization,
     minimization: draft.minimization,
+    precision: draft.precision,
     equilibration: draft.equilibration.map(stagePayload),
     production: draft.productionEnabled
       ? { enabled: true, ...stagePayload(draft.production) }

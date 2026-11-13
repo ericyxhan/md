@@ -18,6 +18,7 @@ const capabilities: Capabilities = {
   input_formats: { protein: [".pdb"], ligand: [".pdb"], all: [".pdb"] },
   integrators: ["langevin_middle"],
   barostats: ["none", "monte_carlo"],
+  precisions: ["mixed", "single", "double"],
   fixed_forcefields: [],
   ligand_forcefield: "",
   defaults: {

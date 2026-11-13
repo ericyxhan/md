@@ -34,6 +34,7 @@ export type IntegratorType =
   | "nose_hoover";
 
 export type BarostatType = "none" | "monte_carlo";
+export type Precision = "mixed" | "single" | "double";
 
 export interface Capabilities {
   api_version: string;
@@ -45,6 +46,7 @@ export interface Capabilities {
   };
   integrators: IntegratorType[];
   barostats: BarostatType[];
+  precisions: Precision[];
   fixed_forcefields: string[];
   ligand_forcefield: string;
   defaults: {
@@ -172,6 +174,8 @@ export interface JobCreate {
   minimization?: MinimizationSpec;
   equilibration?: StageSpec[];
   production?: ProductionSpec;
+  /** Simulation precision. Defaults to mixed (OpenMM default). */
+  precision?: Precision;
 }
 
 export interface StageOut {
