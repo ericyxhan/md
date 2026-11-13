@@ -22,6 +22,22 @@ WORKER_TOKEN = "test-worker-token"
 TEST_WEB_PASSWORD = "test-web-password"
 TEST_SESSION_SECRET = "test-session-secret"
 
+# The administrator account the accounts migration creates.  The bearer
+# token acts as this account, so it owns everything the tests create.
+ADMIN_OWNER_ID = "00000000-0000-4000-8000-000000000001"
+
+
+def owner_root(settings: Settings) -> Path:
+    """The directory that holds everything the administrator owns."""
+
+    return settings.data_root / "users" / ADMIN_OWNER_ID
+
+
+def job_workspace(settings: Settings, job_id: str) -> Path:
+    """The workspace of one job of the administrator."""
+
+    return owner_root(settings) / "jobs" / job_id
+
 
 def upgrade_database(database_url: str) -> None:
     config = Config(str(API_DIR / "alembic.ini"))

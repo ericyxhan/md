@@ -10,7 +10,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 MIB = 1024 * 1024
@@ -35,9 +35,26 @@ class Settings(BaseSettings):
     service_api_token: str = ""
     worker_token: str = ""
 
+    # -- Accounts ---------------------------------------------------------
+    # Self-service registration.  Turn it off to keep the deployment
+    # invitation-only; accounts are then created by an administrator.
+    registration_enabled: bool = True
+    # New accounts start inactive when this is set, so an administrator has
+    # to approve them before they can sign in.
+    require_admin_approval: bool = False
+
+    # The administrator account.  It is the account the lab used before
+    # accounts existed: WEB_PASSWORD_HASH is kept as its password so the
+    # current sign-in keeps working.
+    admin_email: str = "admin@lattice.local"
+    admin_first_name: str = "Lab"
+    admin_last_name: str = "Administrator"
+    admin_password_hash: str = ""
+
     # -- Browser sessions -------------------------------------------------
-    # The web frontend never receives SERVICE_API_TOKEN.  It signs in with a
-    # shared lab password and receives a signed HttpOnly cookie instead.
+    # The web frontend never receives SERVICE_API_TOKEN.  It signs in with
+    # an account email address and password and receives a signed HttpOnly
+    # cookie instead.
     web_password: str = ""
     web_password_hash: str = ""
     web_session_secret: str = ""
@@ -46,6 +63,9 @@ class Settings(BaseSettings):
     )
     web_cookie_secure: bool = True
     web_login_attempts_per_minute: int = Field(default=10, ge=1, le=1000)
+    # Set false to keep the deployment bearer-token only: browsers cannot
+    # sign in at all and the console stays closed.
+    web_login_enabled: bool = True
 
     # -- Workflow ---------------------------------------------------------
     simulation_platform: str = "CUDA"
@@ -127,6 +147,19 @@ class Settings(BaseSettings):
     @classmethod
     def _absolute_data_root(cls, value: Path) -> Path:
         return value.expanduser()
+
+    @model_validator(mode="after")
+    def _admin_password_falls_back_to_the_lab_password(self) -> "Settings":
+        """The lab password becomes the administrator's password.
+
+        Deployments that existed before accounts do not set
+        ``ADMIN_PASSWORD_HASH``; they set ``WEB_PASSWORD_HASH``.  Falling
+        back keeps the current sign-in working after the upgrade.
+        """
+
+        if not self.admin_password_hash and self.web_password_hash:
+            self.admin_password_hash = self.web_password_hash
+        return self
 
     @property
     def cors_origin_list(self) -> list[str]:

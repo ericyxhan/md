@@ -76,6 +76,7 @@ class ClaimStage(InternalModel):
 
 class ClaimResponse(InternalModel):
     job_id: str
+    owner_id: str
     run_token: str
     config_path: str
     job_root: str
@@ -158,6 +159,9 @@ class PrepClaimRequest(InternalModel):
 class PrepClaimResponse(InternalModel):
     prep_job_id: str
     run_token: str
+    # The account the preparation belongs to.  The worker uses it to check
+    # that the workspace it was handed is the one it is supposed to write to.
+    owner_id: str
     # Membrane-embed fields
     protein_file_id: str | None = None
     lipid: str | None = None

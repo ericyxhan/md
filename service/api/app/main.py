@@ -13,11 +13,23 @@ from .errors import install_error_handlers
 from .middleware import RequestContextMiddleware
 from .observability import configure_logging
 from .ratelimit import TokenBucketRateLimiter
-from .routers import capabilities, files, health, internal, internal_prep, jobs, prep, session, workflows
+from .routers import (
+    capabilities,
+    files,
+    health,
+    internal,
+    internal_prep,
+    jobs,
+    prep,
+    session,
+    users,
+    workflows,
+)
 from .security import rate_limit
 from .services.reaper import LeaseReaper
 from .settings import Settings, get_settings
 from .storage import LocalStorage
+from .users import ensure_admin
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -31,6 +43,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI):
         ensure_database_directory(settings)
         storage.ensure_layout()
+        # The administrator account is the account the lab used before
+        # accounts existed.  Creating it here means the bearer token always
+        # resolves to somebody, even on a database that was created without
+        # the accounts migration.
+        with session_factory() as db:
+            admin = ensure_admin(db, settings)
+            app.state.admin_owner_id = admin.id
         reaper = LeaseReaper(session_factory, settings)
         app.state.reaper = reaper
         reaper.start()
@@ -54,6 +73,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.engine = engine
     app.state.session_factory = session_factory
     app.state.storage = storage
+    # Set before the lifespan runs so a request that arrives before the
+    # first startup still finds a well-defined administrator.  The lifespan
+    # overwrites it with the real account id.
+    app.state.admin_owner_id = None
     app.state.rate_limiter = TokenBucketRateLimiter(
         settings.rate_limit_requests_per_minute
     )
@@ -83,6 +106,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     install_error_handlers(app)
     app.include_router(health.router)
     app.include_router(session.router)
+    app.include_router(users.router)
     app.include_router(internal.router)
     app.include_router(internal_prep.router)
 

@@ -9,7 +9,7 @@ from sqlalchemy import select
 from app.config_builder import load_workflow_config
 from app.models import Job
 from app.settings import Settings
-from conftest import job_payload
+from conftest import job_payload, job_workspace
 
 
 def test_create_list_and_detail(client, auth, settings: Settings, upload) -> None:
@@ -33,7 +33,7 @@ def test_create_list_and_detail(client, auth, settings: Settings, upload) -> Non
     assert job["stages"][1]["steps_target"] == 10
     assert job["error"] is None
 
-    job_root = settings.data_root / "jobs" / job["id"]
+    job_root = job_workspace(settings, job["id"])
     assert (job_root / "config.toml").is_file()
     assert (job_root / "job.json").is_file()
     assert (job_root / "inputs" / "complex.pdb").is_file()

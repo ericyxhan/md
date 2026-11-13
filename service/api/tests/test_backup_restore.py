@@ -6,7 +6,7 @@ import shutil
 import sqlite3
 from pathlib import Path
 
-from conftest import job_payload
+from conftest import ADMIN_OWNER_ID, job_payload, job_workspace
 
 
 def test_sqlite_backup_and_job_data_restore(
@@ -25,9 +25,7 @@ def test_sqlite_backup_and_job_data_restore(
     ).json()
     assert claimed["job_id"] == completed_job["id"]
     artifact_path = (
-        settings.data_root
-        / "jobs"
-        / completed_job["id"]
+        job_workspace(settings, completed_job["id"])
         / "outputs"
         / "stages"
         / "equil-01"
@@ -103,7 +101,13 @@ def test_sqlite_backup_and_job_data_restore(
     assert artifact_count == 1
     assert audit_count >= 4
 
-    job_root = restored_data / "jobs" / completed_job["id"]
+    job_root = (
+        restored_data
+        / "users"
+        / ADMIN_OWNER_ID
+        / "jobs"
+        / completed_job["id"]
+    )
     assert (job_root / "config.toml").is_file()
     assert (job_root / "job.json").is_file()
     assert (job_root / "inputs" / "complex.pdb").is_file()

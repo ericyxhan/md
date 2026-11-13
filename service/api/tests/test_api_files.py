@@ -6,6 +6,7 @@ import hashlib
 import json
 
 from app.settings import Settings
+from conftest import job_workspace, owner_root
 
 
 def test_auth_is_required(client) -> None:
@@ -52,7 +53,7 @@ def test_upload_enforces_size_limit(client, settings: Settings, upload) -> None:
     assert response.status_code == 413
     assert response.json()["error"]["code"] == "upload_too_large"
 
-    stem = settings.data_root / "uploads"
+    stem = owner_root(settings) / "uploads"
     leftovers = list(stem.rglob("*.part")) if stem.exists() else []
     assert leftovers == []
 
@@ -260,7 +261,7 @@ def test_series_endpoint_returns_downsampled_points(
     assert response.status_code == 202, response.text
     job_id = response.json()["id"]
 
-    root = settings.data_root / "jobs" / job_id
+    root = job_workspace(settings, job_id)
     analysis_dir = root / "outputs" / "analysis"
     analysis_dir.mkdir(parents=True)
 

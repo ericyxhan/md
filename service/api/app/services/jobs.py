@@ -259,8 +259,8 @@ def create_job(
     check_queue_limit(session, owner_id, settings)
     ensure_disk_capacity(settings, storage)
     job_id = str(uuid.uuid4())
-    final_root = storage.job_root(job_id)
-    temporary_root = storage.jobs / f".{job_id}.tmp"
+    final_root = storage.job_root(owner_id, job_id)
+    temporary_root = storage.job_temp_root(owner_id, job_id)
     created_at = utcnow_iso()
 
     try:
@@ -673,9 +673,9 @@ def validate_job(
     return canonical, config_text
 
 
-def remove_workspace(storage: LocalStorage, job_id: str) -> None:
+def remove_workspace(storage: LocalStorage, owner_id: str, job_id: str) -> None:
     """Best-effort workspace removal (used by tests and future admin tasks)."""
 
-    root = storage.job_root(job_id)
+    root = storage.job_root(owner_id, job_id)
     if root.exists():
         shutil.rmtree(root, ignore_errors=True)

@@ -16,6 +16,7 @@ from app.session import (
 )
 from app.settings import Settings
 from conftest import (
+    ADMIN_OWNER_ID,
     TEST_SESSION_SECRET,
     TEST_WEB_PASSWORD,
     job_payload,
@@ -24,10 +25,13 @@ from conftest import (
 
 PDB = b"HEADER\nATOM      1  N   ALA A   1       0.000   0.000   0.000\n"
 
+ADMIN_EMAIL = "admin@lattice.local"
+
 
 def _login(client: TestClient) -> str:
     response = client.post(
-        "/api/v1/session", json={"password": TEST_WEB_PASSWORD}
+        "/api/v1/session",
+        json={"email": ADMIN_EMAIL, "password": TEST_WEB_PASSWORD},
     )
     assert response.status_code == 200, response.text
     assert response.json()["authenticated"] is True
@@ -47,8 +51,10 @@ def test_login_sets_httponly_session_and_readable_csrf(client) -> None:
     assert described.status_code == 200
     body = described.json()
     assert body["authenticated"] is True
-    assert body["owner"] == "local"
+    assert body["owner"] == ADMIN_OWNER_ID
     assert body["auth_method"] == "cookie"
+    assert body["user"]["email"] == ADMIN_EMAIL
+    assert body["user"]["is_admin"] is True
 
     # The session cookie is enough for read requests; no bearer token needed.
     assert client.get("/api/v1/capabilities").status_code == 200
@@ -59,16 +65,36 @@ def test_unknown_session_is_reported_without_error(client) -> None:
     assert response.status_code == 200
     assert response.json() == {"authenticated": False, "owner": None,
                                "issued_at": None, "expires_at": None,
-                               "auth_method": None}
+                               "auth_method": None, "user": None}
 
 
 def test_bad_password_is_rejected_and_sets_no_cookie(client) -> None:
     response = client.post(
-        "/api/v1/session", json={"password": "not-the-password"}
+        "/api/v1/session",
+        json={"email": ADMIN_EMAIL, "password": "not-the-password"},
     )
     assert response.status_code == 401
     assert response.json()["error"]["code"] == "invalid_credentials"
     assert client.cookies.get(SESSION_COOKIE) is None
+
+
+def test_unknown_email_is_rejected(client) -> None:
+    response = client.post(
+        "/api/v1/session",
+        json={"email": "nobody@example.com", "password": TEST_WEB_PASSWORD},
+    )
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "invalid_credentials"
+
+
+def test_login_without_an_email_uses_the_administrator(client) -> None:
+    """The shared-lab sign-in keeps working for the administrator."""
+
+    response = client.post(
+        "/api/v1/session", json={"password": TEST_WEB_PASSWORD}
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["owner"] == ADMIN_OWNER_ID
 
 
 def test_cookie_mutations_require_csrf_and_csrf_allows_them(
@@ -133,35 +159,38 @@ def test_login_is_rate_limited(settings: Settings) -> None:
     with TestClient(app) as client:
         assert (
             client.post(
-                "/api/v1/session", json={"password": "wrong"}
+                "/api/v1/session",
+                json={"email": ADMIN_EMAIL, "password": "wrong"},
             ).status_code
             == 401
         )
         assert (
             client.post(
-                "/api/v1/session", json={"password": "wrong"}
+                "/api/v1/session",
+                json={"email": ADMIN_EMAIL, "password": "wrong"},
             ).status_code
             == 401
         )
         limited = client.post(
-            "/api/v1/session", json={"password": TEST_WEB_PASSWORD}
+            "/api/v1/session",
+            json={"email": ADMIN_EMAIL, "password": TEST_WEB_PASSWORD},
         )
         assert limited.status_code == 429
         assert limited.json()["error"]["code"] == "too_many_login_attempts"
         assert int(limited.headers["Retry-After"]) >= 1
 
 
-def test_session_routes_are_unavailable_without_configuration(
+def test_session_routes_are_unavailable_when_sign_in_is_disabled(
     settings: Settings,
 ) -> None:
-    settings.web_password = ""
-    settings.web_password_hash = ""
+    settings.web_login_enabled = False
     upgrade_database(settings.database_url)
     app = create_app(settings)
 
     with TestClient(app) as client:
         response = client.post(
-            "/api/v1/session", json={"password": "anything"}
+            "/api/v1/session",
+            json={"email": ADMIN_EMAIL, "password": TEST_WEB_PASSWORD},
         )
         assert response.status_code == 503
         assert response.json()["error"]["code"] == "session_not_configured"
@@ -169,7 +198,10 @@ def test_session_routes_are_unavailable_without_configuration(
 
 def test_signed_session_round_trip_and_tamper_rejection() -> None:
     token, session = encode_session(
-        TEST_SESSION_SECRET, "local", ttl_seconds=600, now=1_700_000_000
+        TEST_SESSION_SECRET,
+        ADMIN_OWNER_ID,
+        ttl_seconds=600,
+        now=1_700_000_000,
     )
     decoded = decode_session(
         TEST_SESSION_SECRET, token, now=1_700_000_100
@@ -191,7 +223,8 @@ def test_scrypt_password_hash_verification(settings: Settings) -> None:
 @pytest.mark.parametrize("cookie_name", [SESSION_COOKIE, CSRF_COOKIE])
 def test_login_cookie_attributes(client, cookie_name: str) -> None:
     response = client.post(
-        "/api/v1/session", json={"password": TEST_WEB_PASSWORD}
+        "/api/v1/session",
+        json={"email": ADMIN_EMAIL, "password": TEST_WEB_PASSWORD},
     )
     header = response.headers.get("set-cookie", "")
     assert cookie_name in header or client.cookies.get(cookie_name)

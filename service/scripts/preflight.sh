@@ -35,7 +35,7 @@ if python3 "$SCRIPT_DIR/check-contract.py" >/tmp/md-contract-check.log 2>&1; the
 else
     fail "the shared values have drifted apart" \
          "run: python3 service/scripts/check-contract.py"
-    grep -A2 "^\[FAIL\]" /tmp/md-contract-check.log | head -30
+    grep -A2 "^\[FAIL\]" /tmp/md-contract-check.log 2>/dev/null | head -30 || true
 fi
 
 echo
@@ -77,11 +77,11 @@ else
     pass "the public and worker tokens are different"
 fi
 
-if [[ -n "$(read_env WEB_PASSWORD)$(read_env WEB_PASSWORD_HASH)" ]]; then
-    pass "a browser login is configured"
+if [[ -n "$(read_env ADMIN_PASSWORD_HASH)$(read_env WEB_PASSWORD_HASH)$(read_env WEB_PASSWORD)" ]]; then
+    pass "an account password is configured"
 else
-    fail "no browser login is configured" \
-         "set WEB_PASSWORD_HASH in $ENV_FILE or the console cannot be opened"
+    fail "no account password is configured" \
+         "set ADMIN_PASSWORD_HASH in $ENV_FILE or the administrator cannot sign in"
 fi
 
 env_perms="$(stat -c '%a' "$ENV_FILE" 2>/dev/null || echo "")"
@@ -96,6 +96,46 @@ if [[ -d "$HOST_DB_DIR" ]]; then
     pass "the database directory exists"
 else
     fail "the database directory is missing" "$HOST_DB_DIR"
+fi
+
+# The API writes to the database as the service account.  A SQLite database
+# in WAL mode keeps two side files next to it, and the API has to be able to
+# write to both of them.  When they end up owned by another account -- a
+# script that opened the database from the host does that -- every write
+# fails with "attempt to write a readonly database" while reads keep
+# working, which looks like a broken API rather than a permissions
+# problem.  Catch it here, where the remedy is still obvious.
+if [[ -d "$HOST_DB_DIR" ]]; then
+    db_files=("$HOST_DB_DIR/app.db" "$HOST_DB_DIR/app.db-wal" "$HOST_DB_DIR/app.db-shm")
+    wrong_owner=()
+    for db_file in "${db_files[@]}"; do
+        [[ -e "$db_file" ]] || continue
+        owner_uid="$(stat -c '%u' "$db_file" 2>/dev/null || echo "")"
+        if [[ -n "$owner_uid" && "$owner_uid" != "$MD_SERVICE_UID" ]]; then
+            wrong_owner+=("$db_file")
+        fi
+    done
+
+    if [[ ${#wrong_owner[@]} -eq 0 ]]; then
+        pass "the database belongs to the service account"
+    else
+        # A write-ahead log that is already empty holds nothing that is not
+        # in the database file, so removing it loses nothing and lets the
+        # API recreate it with the right owner.  A log with content in it
+        # holds committed transactions, so it is only chown-ed, never
+        # removed.
+        wal_file="$HOST_DB_DIR/app.db-wal"
+        wal_size=0
+        [[ -f "$wal_file" ]] && wal_size="$(stat -c '%s' "$wal_file" 2>/dev/null || echo 0)"
+
+        if [[ "$wal_size" -eq 0 ]]; then
+            rm -f "$HOST_DB_DIR/app.db-wal" "$HOST_DB_DIR/app.db-shm"
+            pass "the stale database side files were removed so the API can recreate them"
+        else
+            fail "the database is owned by another account" \
+                 "run: sudo chown -R ${MD_SERVICE_UID}:${MD_SERVICE_GID} ${HOST_DB_DIR}"
+        fi
+    fi
 fi
 
 if [[ -d "$HOST_DATA_DIR" ]]; then
@@ -141,18 +181,21 @@ if "${COMPOSE[@]}" ps --status running --services 2>/dev/null | grep -q "^api$";
     # variable interpolation: a scrypt hash contains '$' separators, and an
     # unquoted value loses everything after the first one.  Compare the file
     # with what the running container actually received.
-    env_hash="$(read_env WEB_PASSWORD_HASH)"
-    if [[ -n "$env_hash" ]]; then
+    for hash_key in ADMIN_PASSWORD_HASH WEB_PASSWORD_HASH; do
+        env_hash="$(read_env "$hash_key")"
+        if [[ -z "$env_hash" ]]; then
+            continue
+        fi
         container_hash="$(docker inspect md-service-api-1 \
             --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null \
-            | sed -n 's/^WEB_PASSWORD_HASH=//p' | tail -n 1)"
+            | sed -n "s/^${hash_key}=//p" | tail -n 1)"
         if [[ "$container_hash" == "$env_hash" ]]; then
-            pass "the password hash reached the api intact"
+            pass "$hash_key reached the api intact"
         else
-            fail "the password hash was altered on its way to the api" \
-                 "the browser login will not work; quote the value in $ENV_FILE"
+            fail "$hash_key was altered on the way to the api" \
+                 "the sign-in will not work; quote the value in $ENV_FILE"
         fi
-    fi
+    done
 
     # Every service that parses user-supplied files runs unprivileged.
     for service in worker prep-worker; do

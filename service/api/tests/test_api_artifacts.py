@@ -8,7 +8,7 @@ from sqlalchemy import select
 
 from app.models import Artifact, Job
 from app.settings import Settings
-from conftest import job_payload
+from conftest import ADMIN_OWNER_ID, job_payload, job_workspace
 
 WORKER = {"worker_id": "gpu-0", "gpu_uuid": "GPU-1234"}
 
@@ -51,7 +51,7 @@ def _completed_job_with_artifacts(
 ) -> tuple[dict, dict[str, Path]]:
     job = _create_job(client, auth, upload)
     claimed = _claim(client, worker_auth, job["id"])
-    root = settings.data_root / "jobs" / job["id"]
+    root = job_workspace(settings, job["id"])
 
     trajectory = root / "outputs" / "stages" / "equil-01" / "trajectory.dcd"
     trajectory.parent.mkdir(parents=True, exist_ok=True)
@@ -192,7 +192,7 @@ def test_artifacts_are_job_scoped_and_owner_scoped(
     with app.state.session_factory() as session:
         stored = session.get(Job, job["id"])
         assert stored is not None
-        stored.owner_id = "local"
+        stored.owner_id = ADMIN_OWNER_ID
         session.commit()
 
 
@@ -253,7 +253,7 @@ def test_log_list_tail_and_download(
     client, app, auth, worker_auth, settings: Settings, upload
 ) -> None:
     job = _create_job(client, auth, upload)
-    root = settings.data_root / "jobs" / job["id"]
+    root = job_workspace(settings, job["id"])
     logs = root / "logs"
     logs.mkdir(parents=True, exist_ok=True)
     (logs / "worker.log").write_text(
@@ -320,7 +320,7 @@ def test_registered_log_artifacts_are_listed(
     job, _ = _completed_job_with_artifacts(
         client, auth, worker_auth, settings, upload
     )
-    root = settings.data_root / "jobs" / job["id"]
+    root = job_workspace(settings, job["id"])
     extra = root / "outputs" / "logs" / "workflow.log"
     extra.parent.mkdir(parents=True, exist_ok=True)
     extra.write_text("workflow log\n", encoding="utf-8")

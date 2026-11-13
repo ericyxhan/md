@@ -168,7 +168,7 @@ def upload_file(
 
     file_id = str(uuid.uuid4())
     try:
-        destination = storage.upload_path(file_id, safe_name)
+        destination = storage.upload_path(owner, file_id, safe_name)
     except StorageError as exc:  # pragma: no cover - defensive
         raise APIError(400, "invalid_filename", str(exc)) from exc
     temporary = destination.with_name(destination.name + ".part")
@@ -212,9 +212,7 @@ def upload_file(
         destination.unlink(missing_ok=True)
         # Leave nothing behind: the upload directory is created for the
         # file, and an empty directory would outlive the rejected upload.
-        with_parent = destination.parent
-        if with_parent.is_dir() and not any(with_parent.iterdir()):
-            with_parent.rmdir()
+        storage.prune_empty_upload_dirs(owner, file_id)
         raise APIError(
             413,
             "too_many_atoms",
@@ -235,7 +233,7 @@ def upload_file(
         content_type=(file.content_type or "application/octet-stream")[:128],
         size_bytes=size,
         sha256=digest.hexdigest(),
-        storage_key=storage.upload_key(file_id, safe_name),
+        storage_key=storage.upload_key(owner, file_id, safe_name),
         created_at=utcnow_iso(),
     )
     try:
@@ -328,7 +326,7 @@ def _preview_response(
     if record.size_bytes > settings.max_preview_bytes:
         derived = ensure_preview(
             path,
-            storage.preview_path(file_id),
+            storage.preview_path(owner, file_id),
             max_atoms=settings.max_preview_atoms,
         )
         if derived is None:

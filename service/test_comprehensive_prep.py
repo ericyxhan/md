@@ -117,7 +117,7 @@ print(f"  Output file: {job2_output}")
 
 # Verify chain A only
 import os
-for root, dirs, files in os.walk('/data/uploads'):
+for root, dirs, files in os.walk('/data/users'):
     for f in files:
         if f == 'system_prep.pdb' and job2_output in root:
             path = os.path.join(root, f)
@@ -155,7 +155,7 @@ print(f"  Output file: {job3_output}")
 
 # Step 5: Verify final output can be used for MD
 print("\n--- Step 5: Verify final output is valid PDB ---")
-for root, dirs, files in os.walk('/data/uploads'):
+for root, dirs, files in os.walk('/data/users'):
     for f in files:
         if f == 'system_prep.pdb' and job3_output in root:
             path = os.path.join(root, f)

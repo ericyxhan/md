@@ -78,9 +78,11 @@ def _content_type(item: Any, path) -> str:
     return guessed[:128]
 
 
-def _artifact_path(storage: LocalStorage, job_id: str, relative_path: str):
+def _artifact_path(
+    storage: LocalStorage, owner_id: str, job_id: str, relative_path: str
+):
     try:
-        return storage.job_path(job_id, relative_path)
+        return storage.job_path(owner_id, job_id, relative_path)
     except StorageError as exc:
         raise APIError(
             400,
@@ -91,7 +93,7 @@ def _artifact_path(storage: LocalStorage, job_id: str, relative_path: str):
 
 
 def _confined_file(
-    storage: LocalStorage, job_id: str, relative_path: str
+    storage: LocalStorage, owner_id: str, job_id: str, relative_path: str
 ) -> Path:
     """Resolve a stored relative path for a public read.
 
@@ -100,7 +102,7 @@ def _confined_file(
     """
 
     try:
-        path = storage.job_path(job_id, relative_path)
+        path = storage.job_path(owner_id, job_id, relative_path)
     except StorageError as exc:
         raise APIError(
             404,
@@ -150,7 +152,7 @@ def validate_artifacts(
                 {"available": sorted(stage_names)},
             )
 
-        path = _artifact_path(storage, job.id, item.relative_path)
+        path = _artifact_path(storage, job.owner_id, job.id, item.relative_path)
         if not path.exists():
             raise APIError(
                 422,
@@ -362,7 +364,9 @@ def build_job_views(
         )
         manifest_data: dict[str, Any] | None = None
         if files.manifest is not None:
-            path = _confined_file(storage, job.id, files.manifest.relative_path)
+            path = _confined_file(
+                storage, job.owner_id, job.id, files.manifest.relative_path
+            )
             if path.stat().st_size <= _MAX_INLINE_VIEW_MANIFEST_BYTES:
                 try:
                     parsed = json.loads(path.read_text(encoding="utf-8"))
@@ -375,7 +379,7 @@ def build_job_views(
 
 
 def artifact_path(storage: LocalStorage, job: Job, artifact: Artifact) -> Path:
-    return _confined_file(storage, job.id, artifact.relative_path)
+    return _confined_file(storage, job.owner_id, job.id, artifact.relative_path)
 
 
 # ---------------------------------------------------------------------------
@@ -384,10 +388,10 @@ def artifact_path(storage: LocalStorage, job: Job, artifact: Artifact) -> Path:
 
 
 def _file_metadata(
-    storage: LocalStorage, job_id: str, relative_path: str
+    storage: LocalStorage, owner_id: str, job_id: str, relative_path: str
 ) -> tuple[Path, os.stat_result] | None:
     try:
-        path = storage.job_path(job_id, relative_path)
+        path = storage.job_path(owner_id, job_id, relative_path)
         stat = path.stat()
     except (StorageError, OSError):
         return None
@@ -397,9 +401,9 @@ def _file_metadata(
 
 
 def _log_entry(
-    storage: LocalStorage, job_id: str, relative_path: str
+    storage: LocalStorage, owner_id: str, job_id: str, relative_path: str
 ) -> LogEntry | None:
-    metadata = _file_metadata(storage, job_id, relative_path)
+    metadata = _file_metadata(storage, owner_id, job_id, relative_path)
     if metadata is None:
         return None
     path, stat = metadata
@@ -435,7 +439,7 @@ def list_logs(
 
     entries: list[LogEntry] = []
     for relative_path in sorted(paths):
-        entry = _log_entry(storage, job.id, relative_path)
+        entry = _log_entry(storage, job.owner_id, job.id, relative_path)
         if entry is not None:
             entries.append(entry)
     return entries
@@ -471,7 +475,7 @@ def get_log(
 
 
 def log_path(storage: LocalStorage, job: Job, entry: LogEntry) -> Path:
-    return _confined_file(storage, job.id, entry.relative_path)
+    return _confined_file(storage, job.owner_id, job.id, entry.relative_path)
 
 
 def read_log_tail(

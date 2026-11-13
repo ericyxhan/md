@@ -276,9 +276,10 @@ def claim(
             )
             for stage in job.stages
         ]
-        job_root = storage.job_root(job.id)
+        job_root = storage.job_root(job.owner_id, job.id)
         response = ClaimResponse(
             job_id=job.id,
+            owner_id=job.owner_id,
             run_token=job.run_token,
             config_path=str(job_root / "config.toml"),
             job_root=str(job_root),

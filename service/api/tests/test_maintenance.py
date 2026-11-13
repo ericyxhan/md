@@ -17,7 +17,7 @@ from app.services.maintenance import (
 )
 from app.settings import Settings
 from app.timeutils import to_iso, utcnow
-from conftest import job_payload
+from conftest import job_payload, job_workspace, owner_root
 
 from app.errors import APIError
 
@@ -73,7 +73,8 @@ def test_disk_reserve_rejects_job_without_leaving_a_workspace(
 
     with app.state.session_factory() as session:
         assert session.scalars(select(Job)).all() == []
-    assert list((settings.data_root / "jobs").iterdir()) == []
+    jobs_dir = owner_root(settings) / "jobs"
+    assert not jobs_dir.exists() or list(jobs_dir.iterdir()) == []
 
 
 def test_ensure_disk_capacity_raises_api_error(settings: Settings, app) -> None:
@@ -95,7 +96,7 @@ def test_cleanup_expired_jobs_removes_rows_and_workspace(
 ) -> None:
     job = _create_job(client, auth, upload)
     claimed = _claim(client, worker_auth, job["id"])
-    root = settings.data_root / "jobs" / job["id"]
+    root = job_workspace(settings, job["id"])
     artifact_path = root / "outputs" / "stages" / "equil-01" / "trajectory.dcd"
     artifact_path.parent.mkdir(parents=True, exist_ok=True)
     artifact_path.write_bytes(b"trajectory")
@@ -187,11 +188,11 @@ def test_cleanup_keeps_recent_and_active_jobs(
 def test_cleanup_orphan_workspaces(
     client, app, settings: Settings
 ) -> None:
-    orphan = settings.data_root / "jobs" / ".abandoned.tmp"
+    orphan = owner_root(settings) / "jobs" / ".abandoned.tmp"
     (orphan / "outputs").mkdir(parents=True)
     (orphan / "outputs" / "big.bin").write_bytes(b"x" * 256)
 
-    partial = settings.data_root / "uploads" / "file-id" / "upload.pdb.part"
+    partial = owner_root(settings) / "uploads" / "file-id" / "upload.pdb.part"
     partial.parent.mkdir(parents=True)
     partial.write_bytes(b"partial")
 

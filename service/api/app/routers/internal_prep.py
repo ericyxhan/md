@@ -62,6 +62,10 @@ def claim(
             404, "prep_job_not_found", f"Prep job {result.prep_job_id} not found"
         )
 
+    # Each account has its own preparation workspaces.
+    storage = LocalStorage(settings)
+    work_dir = storage.owner_prep(job.owner_id) / result.prep_job_id
+
     # Resolve the request data to determine job type and parameters.
     request_data = _load_json(job.request_json)
     job_type = request_data.get("type")
@@ -82,11 +86,9 @@ def claim(
                 raise APIError(
                     404, "file_not_found", f"Source file {input_file_id} not found"
                 )
-            storage = LocalStorage(settings)
-            source_path = str(storage.absolute_key(file_record.storage_key))
+                source_path = str(storage.absolute_key(file_record.storage_key))
 
         # Resolve ligand file paths so the worker can find them.
-        storage = LocalStorage(settings)
         steps = []
         for step in request_data.get("steps", []):
             step_copy = dict(step)
@@ -103,11 +105,10 @@ def claim(
                 step_copy["_ligand_paths"] = ligand_paths
             steps.append(step_copy)
 
-        work_dir = Path(f"/data/prep/{result.prep_job_id}")
-
         return PrepClaimResponse(
             prep_job_id=result.prep_job_id,
             run_token=result.run_token,
+            owner_id=job.owner_id,
             job_type=job_type,
             steps=steps,
             source_path=source_path,
@@ -120,14 +121,12 @@ def claim(
         raise APIError(
             404, "file_not_found", f"Source file {result.protein_file_id} not found"
         )
-    storage = LocalStorage(settings)
     source_path = storage.absolute_key(file_record.storage_key)
-
-    work_dir = Path(f"/data/prep/{result.prep_job_id}")
 
     return PrepClaimResponse(
         prep_job_id=result.prep_job_id,
         run_token=result.run_token,
+        owner_id=job.owner_id,
         job_type=job_type,
         protein_file_id=result.protein_file_id,
         lipid=result.lipid,

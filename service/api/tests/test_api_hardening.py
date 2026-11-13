@@ -13,7 +13,7 @@ from app import observability
 from app.main import create_app
 from app.models import AuditEvent
 from app.settings import Settings
-from conftest import TEST_TOKEN, job_payload, upgrade_database
+from conftest import ADMIN_OWNER_ID, TEST_TOKEN, job_payload, upgrade_database
 
 
 def test_request_id_is_returned_and_sanitized(client, auth) -> None:
@@ -83,7 +83,7 @@ def test_job_mutations_write_audit_events(client, app, auth, upload) -> None:
             ).all()
         )
     assert [row.action for row in rows] == ["job.create"]
-    assert rows[0].owner_id == "local"
+    assert rows[0].owner_id == ADMIN_OWNER_ID
     assert rows[0].target_type == "job"
     assert rows[0].target_id == job_id
     assert rows[0].outcome == "accepted"

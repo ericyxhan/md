@@ -140,8 +140,8 @@ def cleanup_expired_jobs(
     session = session_factory()
     try:
         candidates = list(
-            session.scalars(
-                select(Job.id).where(
+            session.execute(
+                select(Job.id, Job.owner_id).where(
                     Job.status.in_(TERMINAL_STATUSES),
                     Job.completed_at.is_not(None),
                     Job.completed_at < cutoff,
@@ -151,9 +151,9 @@ def cleanup_expired_jobs(
     finally:
         session.close()
 
-    for job_id in candidates:
+    for job_id, owner_id in candidates:
         try:
-            root = storage.job_root(job_id)
+            root = storage.job_root(owner_id, job_id)
         except StorageError:
             continue
         size = _tree_size(root)
@@ -212,32 +212,44 @@ def cleanup_orphan_workspaces(
         except OSError:
             return False
 
-    if storage.jobs.is_dir():
-        for entry in storage.jobs.iterdir():
-            if not (entry.name.startswith(".") and entry.name.endswith(".tmp")):
+    # Each account has its own tree, so the temporary workspaces are found
+    # one account at a time.
+    if storage.users.is_dir():
+        for owner_dir in storage.users.iterdir():
+            if not owner_dir.is_dir() or owner_dir.is_symlink():
                 continue
-            if not _is_stale(entry):
+            jobs_dir = owner_dir / "jobs"
+            if not jobs_dir.is_dir():
                 continue
-            size = _tree_size(entry)
-            result.orphan_workspaces_removed += 1
-            result.orphan_bytes_freed += size
-            if not dry_run:
-                storage.remove_tree(entry)
+            for entry in jobs_dir.iterdir():
+                if not (
+                    entry.name.startswith(".") and entry.name.endswith(".tmp")
+                ):
+                    continue
+                if not _is_stale(entry):
+                    continue
+                size = _tree_size(entry)
+                result.orphan_workspaces_removed += 1
+                result.orphan_bytes_freed += size
+                if not dry_run:
+                    storage.remove_tree(entry)
 
-    if storage.uploads.is_dir():
-        for entry in storage.uploads.rglob("*.part"):
-            if entry.is_symlink() or not entry.is_file() or not _is_stale(entry):
+            uploads_dir = owner_dir / "uploads"
+            if not uploads_dir.is_dir():
                 continue
-            try:
-                size = entry.stat().st_size
-            except OSError:
-                continue
-            result.orphan_workspaces_removed += 1
-            result.orphan_bytes_freed += size
-            if not dry_run:
+            for entry in uploads_dir.rglob("*.part"):
+                if entry.is_symlink() or not entry.is_file() or not _is_stale(entry):
+                    continue
                 try:
-                    entry.unlink()
+                    size = entry.stat().st_size
                 except OSError:
-                    pass
+                    continue
+                result.orphan_workspaces_removed += 1
+                result.orphan_bytes_freed += size
+                if not dry_run:
+                    try:
+                        entry.unlink()
+                    except OSError:
+                        pass
 
     return result

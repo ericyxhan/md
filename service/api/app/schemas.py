@@ -259,7 +259,28 @@ class JobValidateRequest(JobCreate):
 
 
 class SessionLogin(StrictModel):
+    """Sign-in credentials.
+
+    ``email`` is the account address.  It may be omitted, in which case the
+    administrator account is used; that keeps the shared-lab sign-in of the
+    pre-accounts deployment working.
+    """
+
+    email: str | None = Field(default=None, max_length=255)
     password: str = Field(min_length=1, max_length=512)
+
+
+class UserOut(BaseModel):
+    """A signed-in account."""
+
+    id: str
+    email: str
+    first_name: str
+    last_name: str
+    is_admin: bool
+    is_active: bool
+    created_at: str
+    last_login_at: str | None = None
 
 
 class SessionOut(BaseModel):
@@ -268,6 +289,74 @@ class SessionOut(BaseModel):
     issued_at: str | None = None
     expires_at: str | None = None
     auth_method: str | None = None
+    user: UserOut | None = None
+
+
+class UserRegister(StrictModel):
+    """The details a new account needs."""
+
+    email: str = Field(min_length=3, max_length=255)
+    # The minimum length is enforced by the account service, which reports
+    # a readable error instead of a schema violation.
+    first_name: str = Field(max_length=100)
+    last_name: str = Field(max_length=100)
+    password: str = Field(min_length=1, max_length=256)
+
+
+class UserProfileUpdate(StrictModel):
+    """Changes a person can make to their own account."""
+
+    first_name: str | None = Field(default=None, max_length=100)
+    last_name: str | None = Field(default=None, max_length=100)
+    email: str | None = Field(default=None, min_length=3, max_length=255)
+    password: str | None = Field(default=None, min_length=1, max_length=256)
+    current_password: str | None = Field(default=None, max_length=512)
+
+    @model_validator(mode="after")
+    def _at_least_one_change(self) -> "UserProfileUpdate":
+        if not any(
+            value is not None
+            for value in (
+                self.first_name,
+                self.last_name,
+                self.email,
+                self.password,
+            )
+        ):
+            raise ValueError("at least one field must be changed")
+        return self
+
+
+class UserAdminUpdate(StrictModel):
+    """Changes an administrator can make to an account."""
+
+    first_name: str | None = Field(default=None, max_length=100)
+    last_name: str | None = Field(default=None, max_length=100)
+    is_active: bool | None = None
+    is_admin: bool | None = None
+    password: str | None = Field(default=None, min_length=1, max_length=256)
+
+    @model_validator(mode="after")
+    def _at_least_one_change(self) -> "UserAdminUpdate":
+        if not any(
+            value is not None
+            for value in (
+                self.first_name,
+                self.last_name,
+                self.is_active,
+                self.is_admin,
+                self.password,
+            )
+        ):
+            raise ValueError("at least one field must be changed")
+        return self
+
+
+class UserAdminOut(UserOut):
+    """An account as seen in the administrator's list."""
+
+    updated_at: str
+    usage: dict[str, int] = Field(default_factory=dict)
 
 
 class RetryRequest(StrictModel):

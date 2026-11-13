@@ -116,5 +116,5 @@ def test_rejected_upload_leaves_no_file_behind(
             )
         },
     )
-    uploads = app.state.storage.uploads
+    uploads = app.state.storage.users
     assert not any(uploads.iterdir()), "the rejected upload was not removed"

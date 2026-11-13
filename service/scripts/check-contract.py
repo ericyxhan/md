@@ -224,6 +224,16 @@ def main() -> int:
 
     if yaml is not None:
         compose = yaml.safe_load(read(compose_path))
+        if not isinstance(compose, dict):
+            # A missing or unreadable compose file is a deployment problem,
+            # not a reason to crash: report it and let the other checks run.
+            report.check(
+                False,
+                "compose.yml could not be read",
+                f"expected a mapping in {compose_path}",
+            )
+            compose = {}
+
         services = compose.get("services", {})
 
         api = services.get("api", {})

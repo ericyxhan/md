@@ -185,6 +185,7 @@ def make_claim(
     tmp_path: Path,
     *,
     job_id: str = "job-1",
+    owner_id: str = "owner-1",
     stages: list[dict[str, Any]] | None = None,
     restart_mode: str = "resume",
     restart_stage: str | None = None,
@@ -194,7 +195,7 @@ def make_claim(
     from config import WorkerConfig
 
     data_root = tmp_path / "data"
-    job_root = data_root / "jobs" / job_id
+    job_root = data_root / "users" / owner_id / "jobs" / job_id
     (job_root / "logs").mkdir(parents=True)
     (job_root / "config.toml").write_text("[run]\n", encoding="utf-8")
     config = WorkerConfig(
@@ -214,6 +215,7 @@ def make_claim(
     )
     claim = {
         "job_id": job_id,
+        "owner_id": owner_id,
         "run_token": "11111111-2222-4333-8444-555555555555",
         "job_root": str(job_root),
         "config_path": str(job_root / "config.toml"),

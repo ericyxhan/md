@@ -114,7 +114,14 @@ class WorkerConfig:
 
     @property
     def jobs_root(self) -> Path:
-        return self.resolved_data_root / "jobs"
+        """The directory that holds every account's job workspaces."""
+
+        return self.resolved_data_root / "users"
+
+    def job_root(self, owner_id: str, job_id: str) -> Path:
+        """The workspace of one job of one account."""
+
+        return self.jobs_root / owner_id / "jobs" / job_id
 
 
 def load_config(

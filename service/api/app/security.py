@@ -1,4 +1,15 @@
-"""Bearer-token authentication and public rate limiting."""
+"""Bearer-token and session authentication, plus public rate limiting.
+
+Two callers are authenticated here:
+
+* machine clients, which send the static ``SERVICE_API_TOKEN`` bearer
+  token and act as the administrator account;
+* browsers, which send a signed session cookie whose subject is the
+  account id.
+
+Both resolve to an account id, which is the ``owner_id`` of everything the
+caller may see.
+"""
 
 from __future__ import annotations
 
@@ -10,8 +21,7 @@ from fastapi import Depends, Header, Request
 from .errors import APIError
 from .observability import current_client_ip, log_event
 from .session import session_from_request, sessions_configured, verify_csrf
-
-OWNER_ID = "local"
+from .users import find_admin, get_user
 
 
 def _bearer_token(authorization: str | None) -> str | None:
@@ -36,11 +46,35 @@ def _audit_denied(request: Request, action: str, reason: str) -> None:
     )
 
 
+def admin_owner_id(request: Request) -> str | None:
+    """Return the id of the administrator account, if there is one.
+
+    The id is cached on the application state after the first lookup.  The
+    lifespan normally sets it during startup; the fallback covers the case
+    where the application is used without running the lifespan.
+    """
+
+    state = request.app.state
+    owner = getattr(state, "admin_owner_id", None)
+    if owner:
+        return owner
+
+    session_factory = getattr(state, "session_factory", None)
+    if session_factory is None:  # pragma: no cover - defensive
+        return None
+    with session_factory() as session:
+        admin = find_admin(session)
+        if admin is None:
+            return None
+        state.admin_owner_id = admin.id
+        return admin.id
+
+
 def require_owner(
     request: Request,
     authorization: str | None = Header(default=None),
 ) -> str:
-    """Authenticate a public API caller and return the owner ID.
+    """Authenticate a public API caller and return the account id.
 
     Accepts either the machine bearer token or a signed browser session
     cookie.  Cookie-authenticated mutating requests must also echo the CSRF
@@ -64,16 +98,31 @@ def require_owner(
                 "unauthorized",
                 "Missing or invalid bearer token",
             )
-        request.state.owner_id = OWNER_ID
+        owner = admin_owner_id(request)
+        if owner is None:
+            raise APIError(
+                503,
+                "auth_not_configured",
+                "No administrator account exists on this server",
+            )
+        request.state.owner_id = owner
         request.state.auth_method = "bearer"
-        return OWNER_ID
+        return owner
 
     session = session_from_request(request)
     if session is not None:
         verify_csrf(request)
-        request.state.owner_id = session.subject
+        owner = _active_user_id(request, session.subject)
+        if owner is None:
+            _audit_denied(request, "auth.denied", "inactive_account")
+            raise APIError(
+                401,
+                "unauthorized",
+                "This account can no longer sign in",
+            )
+        request.state.owner_id = owner
         request.state.auth_method = "session"
-        return session.subject
+        return owner
 
     if not settings.service_api_token and not sessions_configured(settings):
         raise APIError(
@@ -88,6 +137,44 @@ def require_owner(
         "unauthorized",
         "Sign in to continue",
     )
+
+
+def _active_user_id(request: Request, user_id: str) -> str | None:
+    """Return the account id when the account exists and is usable.
+
+    The lookup happens on every request so that deactivating an account
+    takes effect immediately instead of at the next sign-in.
+    """
+
+    session_factory = getattr(request.app.state, "session_factory", None)
+    if session_factory is None:  # pragma: no cover - defensive
+        return None
+    with session_factory() as session:
+        user = get_user(session, user_id)
+        if user is None or not user.is_active:
+            return None
+        return user.id
+
+
+def require_admin(
+    request: Request,
+    owner: str = Depends(require_owner),
+) -> str:
+    """Require an administrator account."""
+
+    session_factory = getattr(request.app.state, "session_factory", None)
+    if session_factory is None:  # pragma: no cover - defensive
+        raise APIError(500, "internal_error", "Session factory is unavailable")
+    with session_factory() as session:
+        user = get_user(session, owner)
+        if user is None or not user.is_admin:
+            _audit_denied(request, "auth.denied", "not_an_administrator")
+            raise APIError(
+                403,
+                "forbidden",
+                "This action requires an administrator account",
+            )
+    return owner
 
 
 def require_worker(

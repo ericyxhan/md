@@ -86,6 +86,15 @@ class PrepConfig:
     def resolved_data_root(self) -> Path:
         return self.data_root.expanduser().resolve()
 
+    def prep_root(self, owner_id: str, prep_job_id: str) -> Path:
+        """The workspace of one preparation of one account.
+
+        Every account has its own tree, so the workspace is addressed by
+        the account as well as by the preparation.
+        """
+
+        return self.resolved_data_root / "users" / owner_id / "prep" / prep_job_id
+
 
 def load_config(
     env: dict[str, str] | None = None,

@@ -52,6 +52,9 @@ FINISH_ATTEMPTS = 3
 # file says nothing about how far the packing has actually progressed.
 _PACKMOL_LOOP_RE = re.compile(r"^\s*Starting GENCAN loop:\s*(\d+)\s*$", re.M)
 _PACKMOL_TYPE_RE = re.compile(r"^\s*Packing molecules of type:\s*(\d+)\s*$", re.M)
+# The account id is part of the workspace path, so it has to be a plain
+# identifier and nothing else.
+_OWNER_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 # The packmol input file never changes while a job runs, and the log only
 # grows.  Both are parsed on every progress poll, so the results are cached
@@ -895,6 +898,12 @@ class PrepWorker:
         if not prep_job_id:
             raise ClaimError("claim missing prep_job_id")
 
+        owner_id = str(data.get("owner_id", ""))
+        if not owner_id:
+            raise ClaimError("claim missing owner_id")
+        if not _OWNER_ID_RE.match(owner_id):
+            raise ClaimError("claim contains an invalid owner id")
+
         run_token = str(data.get("run_token", ""))
         if not run_token:
             raise ClaimError("claim missing run_token")
@@ -916,6 +925,16 @@ class PrepWorker:
             work_dir = Path(str(work_dir_raw))
             if not work_dir.is_absolute():
                 raise ClaimError("claim work_dir must be absolute")
+            # The API supplies absolute paths because the worker mounts the
+            # same data root, but an API bug or compromise must not be able
+            # to point the worker at an arbitrary directory.  The workspace
+            # must be exactly DATA_ROOT/users/<owner_id>/prep/<prep_job_id>.
+            expected = self.config.prep_root(owner_id, prep_job_id)
+            if work_dir.resolve() != expected.resolve():
+                raise ClaimError(
+                    "claim work_dir is outside "
+                    "DATA_ROOT/users/<owner_id>/prep/<prep_job_id>"
+                )
 
         if job_type == "system_prep":
             steps = data.get("steps")

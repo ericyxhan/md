@@ -9,7 +9,7 @@ from sqlalchemy import select
 
 from app.models import Artifact, Job, JobEvent, Worker
 from app.settings import Settings
-from conftest import job_payload
+from conftest import job_payload, job_workspace
 
 WORKER = {"worker_id": "gpu-0", "gpu_uuid": "GPU-1234"}
 
@@ -127,7 +127,7 @@ def test_claim_progress_stage_and_finish(
     assert claimed["restart_stage"] is None
     assert claimed["config_path"].endswith("/config.toml")
     assert claimed["config_path"].startswith(str(settings.data_root))
-    assert claimed["job_root"] == str(settings.data_root / "jobs" / job["id"])
+    assert claimed["job_root"] == str(job_workspace(settings, job["id"]))
     assert [stage["name"] for stage in claimed["stages"]] == [
         "minimization",
         "equil-01",
@@ -187,7 +187,7 @@ def test_claim_progress_stage_and_finish(
     assert stage_row["steps_completed"] == 10
     assert stage_row["completed_at"] is not None
 
-    job_root = settings.data_root / "jobs" / job["id"]
+    job_root = job_workspace(settings, job["id"])
     artifact = job_root / "outputs" / "stages" / "equil-01" / "stage.json"
     artifact.parent.mkdir(parents=True, exist_ok=True)
     artifact.write_text('{"status": "completed"}\n', encoding="utf-8")
@@ -330,7 +330,7 @@ def test_finish_artifact_paths_are_confined(
     client, app, auth, worker_auth, settings: Settings, upload, tmp_path: Path
 ) -> None:
     job, claimed = _claimed_job(client, auth, upload, worker_auth)
-    job_root = settings.data_root / "jobs" / job["id"]
+    job_root = job_workspace(settings, job["id"])
 
     traversal = _finish(
         client,
@@ -490,7 +490,7 @@ def test_duplicate_artifact_reports_are_upserted(
     client, app, auth, worker_auth, settings: Settings, upload
 ) -> None:
     job, claimed = _claimed_job(client, auth, upload, worker_auth)
-    artifact = settings.data_root / "jobs" / job["id"] / "outputs" / "result.json"
+    artifact = job_workspace(settings, job["id"]) / "outputs" / "result.json"
     artifact.parent.mkdir(parents=True, exist_ok=True)
     artifact.write_text("{}", encoding="utf-8")
     entry = {

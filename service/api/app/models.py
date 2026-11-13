@@ -20,6 +20,35 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .db import Base
 
 
+class User(Base):
+    """A person who can sign in to the console.
+
+    The row id doubles as the ``owner_id`` of everything the account
+    creates: jobs, uploads, prep jobs, workflows, and audit events.  One
+    identifier for the account and its data keeps the ownership checks a
+    single equality test everywhere.
+    """
+
+    __tablename__ = "users"
+    __table_args__ = (
+        UniqueConstraint("email", name="uq_users_email"),
+        Index("ix_users_is_active", "is_active"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    email: Mapped[str] = mapped_column(String(255), nullable=False)
+    first_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    last_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    is_admin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True
+    )
+    created_at: Mapped[str] = mapped_column(String(32), nullable=False)
+    updated_at: Mapped[str] = mapped_column(String(32), nullable=False)
+    last_login_at: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+
+
 class Job(Base):
     __tablename__ = "jobs"
     __table_args__ = (

@@ -14,6 +14,14 @@ services:
     environment:
       DATABASE_URL: sqlite:///${MD_DB_MOUNT:-/db}/app.db
       DATA_ROOT: ${MD_DATA_MOUNT:-/data}
+      # The administrator account the migration creates.  These have to match
+      # what the api service passes, or the account would be created twice.
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@lattice.local}
+      ADMIN_FIRST_NAME: ${ADMIN_FIRST_NAME:-Lab}
+      ADMIN_LAST_NAME: ${ADMIN_LAST_NAME:-Administrator}
+      ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH:-}
+      WEB_PASSWORD_HASH: ${WEB_PASSWORD_HASH:-}
+      WEB_PASSWORD: ${WEB_PASSWORD:-}
     volumes:
       - ${HOST_DB_DIR:-/srv/md-service/db}:${MD_DB_MOUNT:-/db}
       - ${HOST_DATA_DIR:-/srv/md-service/data}:${MD_DATA_MOUNT:-/data}
@@ -49,11 +57,20 @@ services:
       DATA_ROOT: ${MD_DATA_MOUNT:-/data}
       SERVICE_API_TOKEN: ${SERVICE_API_TOKEN:?set SERVICE_API_TOKEN}
       WORKER_TOKEN: ${WORKER_TOKEN:?set WORKER_TOKEN}
+      # Accounts.  Registration can be switched off to keep the deployment
+      # invitation-only; new accounts can be held for approval.
+      REGISTRATION_ENABLED: ${REGISTRATION_ENABLED:-true}
+      REQUIRE_ADMIN_APPROVAL: ${REQUIRE_ADMIN_APPROVAL:-false}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@lattice.local}
+      ADMIN_FIRST_NAME: ${ADMIN_FIRST_NAME:-Lab}
+      ADMIN_LAST_NAME: ${ADMIN_LAST_NAME:-Administrator}
+      ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH:-}
       WEB_PASSWORD: ${WEB_PASSWORD:-}
       WEB_PASSWORD_HASH: ${WEB_PASSWORD_HASH:-}
       WEB_SESSION_SECRET: ${WEB_SESSION_SECRET:-}
       WEB_SESSION_TTL_SECONDS: ${WEB_SESSION_TTL_SECONDS:-43200}
       WEB_COOKIE_SECURE: ${WEB_COOKIE_SECURE:-true}
+      WEB_LOGIN_ENABLED: ${WEB_LOGIN_ENABLED:-true}
       WEB_LOGIN_ATTEMPTS_PER_MINUTE: ${WEB_LOGIN_ATTEMPTS_PER_MINUTE:-10}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
       TRUST_FORWARDED_FOR: ${TRUST_FORWARDED_FOR:-true}

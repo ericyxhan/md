@@ -141,7 +141,7 @@ def _copy_output_files(
             continue
         file_id = str(uuid.uuid4())
         safe_name = display_name(source_path.name)
-        destination = storage.upload_path(file_id, safe_name)
+        destination = storage.upload_path(owner, file_id, safe_name)
         destination.parent.mkdir(parents=True, exist_ok=True)
 
         size = source_path.stat().st_size
@@ -161,7 +161,7 @@ def _copy_output_files(
                 content_type=content_type[:128],
                 size_bytes=size,
                 sha256=digest,
-                storage_key=storage.upload_key(file_id, safe_name),
+                storage_key=storage.upload_key(owner, file_id, safe_name),
                 created_at=utcnow_iso(),
             )
         )
@@ -427,7 +427,7 @@ def fetch_pdb_file(
         raise APIError(422, "invalid_pdb_id", "PDB ID must be four characters")
 
     pdb_id = pdb_id.upper()
-    download_dir = storage.uploads / "pdb-downloads"
+    download_dir = storage.cache / "pdb-downloads"
     download_dir.mkdir(parents=True, exist_ok=True)
     dest = download_dir / f"{pdb_id}.pdb"
 
@@ -442,7 +442,7 @@ def fetch_pdb_file(
             digest.update(chunk)
 
     # Copy to the canonical storage location so the artifact route can find it.
-    canonical_dest = storage.upload_path(file_id, safe_name)
+    canonical_dest = storage.upload_path(owner, file_id, safe_name)
     canonical_dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(dest, canonical_dest)
 
@@ -453,7 +453,7 @@ def fetch_pdb_file(
         content_type="chemical/x-pdb",
         size_bytes=canonical_dest.stat().st_size,
         sha256=digest.hexdigest(),
-        storage_key=storage.upload_key(file_id, safe_name),
+        storage_key=storage.upload_key(owner, file_id, safe_name),
         created_at=utcnow_iso(),
     )
 
@@ -489,8 +489,8 @@ def queue_system_prep(
     with _session_scope(settings) as session_factory:
         with session_factory() as session:
             if pdb_id:
-                # Download PDB into the uploads store as a normal file record.
-                download_dir = storage.uploads / "pdb-downloads"
+                # Download PDB into the cache store as a normal file record.
+                download_dir = storage.cache / "pdb-downloads"
                 download_dir.mkdir(parents=True, exist_ok=True)
                 dest = download_dir / f"{pdb_id.upper()}.pdb"
                 _download_pdb(pdb_id, dest, settings)
@@ -505,7 +505,7 @@ def queue_system_prep(
                     content_type="chemical/x-pdb",
                     size_bytes=dest.stat().st_size,
                     sha256="",  # filled below
-                    storage_key=storage.upload_key(file_id, safe_name),
+                    storage_key=storage.upload_key(owner, file_id, safe_name),
                     created_at=utcnow_iso(),
                 )
                 # Compute sha256 after writing.

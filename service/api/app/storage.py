@@ -4,6 +4,15 @@ The database stores only paths relative to ``DATA_ROOT``.  Every read and write
 goes through this module, which rejects absolute paths, traversal components,
 and symlinks.  Replacing this class with an object-storage implementation later
 should not require changing the job model.
+
+Everything an account owns lives under ``DATA_ROOT/users/<owner_id>/``:
+
+    users/<owner_id>/uploads/<file_id>/<name>   uploaded structures
+    users/<owner_id>/jobs/<job_id>/             simulation workspaces
+    users/<owner_id>/prep/<prep_job_id>/        system-preparation workspaces
+
+The account id is part of the path as well as part of every database row, so
+a mistake in an ownership check cannot reach another account's files.
 """
 
 from __future__ import annotations
@@ -30,7 +39,7 @@ class StorageError(ValueError):
 
 
 def validate_id(value: str, label: str = "id") -> str:
-    if not _ID_RE.match(value):
+    if not _ID_RE.match(value or ""):
         raise StorageError(f"Invalid {label}")
     return value
 
@@ -62,38 +71,78 @@ class LocalStorage:
 
     def __init__(self, settings: Settings):
         self.root = settings.data_root.expanduser().resolve()
-        self.uploads = self.root / "uploads"
-        self.jobs = self.root / "jobs"
+        self.users = self.root / "users"
         self.cache = self.root / "cache"
 
     # -- Layout -----------------------------------------------------------
 
     def ensure_layout(self) -> None:
-        for directory in (self.uploads, self.jobs, self.cache):
+        for directory in (self.users, self.cache):
             directory.mkdir(parents=True, exist_ok=True)
 
-    def upload_key(self, file_id: str, safe_name: str) -> str:
+    def owner_root(self, owner_id: str) -> Path:
+        """The directory that holds everything one account owns."""
+
+        validate_id(owner_id, "owner id")
+        return self.users / owner_id
+
+    def owner_uploads(self, owner_id: str) -> Path:
+        return self.owner_root(owner_id) / "uploads"
+
+    def owner_jobs(self, owner_id: str) -> Path:
+        return self.owner_root(owner_id) / "jobs"
+
+    def owner_prep(self, owner_id: str) -> Path:
+        return self.owner_root(owner_id) / "prep"
+
+    def upload_key(self, owner_id: str, file_id: str, safe_name: str) -> str:
+        validate_id(owner_id, "owner id")
         validate_id(file_id, "file id")
-        return f"uploads/{file_id}/{safe_name}"
+        return f"users/{owner_id}/uploads/{file_id}/{safe_name}"
 
-    def upload_path(self, file_id: str, safe_name: str) -> Path:
-        return self.absolute_key(self.upload_key(file_id, safe_name))
+    def upload_path(self, owner_id: str, file_id: str, safe_name: str) -> Path:
+        return self.absolute_key(self.upload_key(owner_id, file_id, safe_name))
 
-    def upload_dir(self, file_id: str) -> Path:
+    def upload_dir(self, owner_id: str, file_id: str) -> Path:
         """The directory that holds one upload and its derived views."""
 
+        validate_id(owner_id, "owner id")
         validate_id(file_id, "file id")
-        return self.uploads / file_id
+        return self.owner_uploads(owner_id) / file_id
 
-    def preview_path(self, file_id: str) -> Path:
+    def preview_path(self, owner_id: str, file_id: str) -> Path:
         """Where the browser-sized preview of an upload is cached."""
 
-        validate_id(file_id, "file id")
-        return self.upload_dir(file_id) / PREVIEW_FILENAME
+        return self.upload_dir(owner_id, file_id) / PREVIEW_FILENAME
 
-    def job_root(self, job_id: str) -> Path:
+    def job_root(self, owner_id: str, job_id: str) -> Path:
+        validate_id(owner_id, "owner id")
         validate_id(job_id, "job id")
-        return self.jobs / job_id
+        return self.owner_jobs(owner_id) / job_id
+
+    def job_temp_root(self, owner_id: str, job_id: str) -> Path:
+        """The staging directory a job workspace is built in."""
+
+        return self.owner_jobs(owner_id) / f".{job_id}.tmp"
+
+    def prune_empty_upload_dirs(self, owner_id: str, file_id: str) -> None:
+        """Remove the directories an upload leaves behind when it fails.
+
+        A rejected upload must not leave a directory tree behind, not even
+        an empty one: the account's directory would otherwise look like it
+        holds data when it does not.
+        """
+
+        for directory in (
+            self.upload_dir(owner_id, file_id),
+            self.owner_uploads(owner_id),
+            self.owner_root(owner_id),
+        ):
+            try:
+                if directory.is_dir() and not any(directory.iterdir()):
+                    directory.rmdir()
+            except OSError:
+                continue
 
     # -- Confinement ------------------------------------------------------
 
@@ -132,10 +181,12 @@ class LocalStorage:
 
         return self._confined_path(self.root, relative_key)
 
-    def job_path(self, job_id: str, relative_path: str) -> Path:
+    def job_path(self, owner_id: str, job_id: str, relative_path: str) -> Path:
         """Resolve a path relative to one job workspace."""
 
-        return self._confined_path(self.job_root(job_id), relative_path)
+        return self._confined_path(
+            self.job_root(owner_id, job_id), relative_path
+        )
 
     def relative_key(self, path: Path) -> str:
         resolved = path.resolve()

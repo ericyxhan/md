@@ -13,6 +13,7 @@ preserves checkpoints on SIGINT, so a canceled job can be resumed later.
 from __future__ import annotations
 
 import argparse
+import re
 import signal
 import subprocess
 import sys
@@ -55,6 +56,7 @@ FINISH_ATTEMPTS = 3
 
 _JOB_ID_RE = STAGE_NAME_RE
 _TOKEN_RE = STAGE_NAME_RE
+_OWNER_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 
 def _utcnow() -> str:
@@ -147,12 +149,16 @@ def parse_claim(data: dict[str, Any], config: WorkerConfig) -> ClaimedJob:
     The API supplies absolute paths because the worker mounts the same data
     root, but an API bug or compromise must not be able to point the worker at
     an arbitrary directory.  The job root must be exactly
-    ``DATA_ROOT/jobs/<job_id>``.
+    ``DATA_ROOT/users/<owner_id>/jobs/<job_id>``.
     """
 
     job_id = _string(data, "job_id", maximum=64)
     if not _JOB_ID_RE.match(job_id):
         raise ClaimError("claim contains an invalid job id")
+
+    owner_id = _string(data, "owner_id", maximum=64)
+    if not _OWNER_ID_RE.match(owner_id):
+        raise ClaimError("claim contains an invalid owner id")
 
     run_token = _string(data, "run_token", maximum=128)
     if not _TOKEN_RE.match(run_token):
@@ -161,10 +167,12 @@ def parse_claim(data: dict[str, Any], config: WorkerConfig) -> ClaimedJob:
     raw_root = Path(_string(data, "job_root", maximum=4096))
     if not raw_root.is_absolute():
         raise ClaimError("claim job_root must be absolute")
-    expected_root = (config.jobs_root / job_id).resolve()
+    expected_root = config.job_root(owner_id, job_id).resolve()
     job_root = raw_root.resolve()
     if job_root != expected_root:
-        raise ClaimError("claim job_root is outside DATA_ROOT/jobs/<job_id>")
+        raise ClaimError(
+            "claim job_root is outside DATA_ROOT/users/<owner_id>/jobs/<job_id>"
+        )
     if not job_root.is_dir():
         raise ClaimError("claim job_root does not exist")
 
@@ -913,25 +921,36 @@ class Worker:
             self._log(f"could not write job log: {exc}")
 
     def _log_local_workspaces(self) -> None:
-        jobs_root = self.config.jobs_root
-        if not jobs_root.is_dir():
-            return
-        try:
-            entries = sorted(jobs_root.iterdir())
-        except OSError:
+        # Workspaces live at DATA_ROOT/users/<owner_id>/jobs/<job_id>.
+        users_root = self.config.jobs_root
+        if not users_root.is_dir():
             return
         found = 0
-        for entry in entries:
-            if found >= 20:
-                break
-            if not entry.is_dir() or entry.name.startswith("."):
+        try:
+            owner_dirs = sorted(users_root.iterdir())
+        except OSError:
+            return
+        for owner_dir in owner_dirs:
+            if not owner_dir.is_dir() or owner_dir.name.startswith("."):
                 continue
-            if (entry / "progress.json").is_file():
-                found += 1
-                self._log(
-                    f"local workspace {entry.name} exists but is not "
-                    "claimed automatically; the API is authoritative"
-                )
+            jobs_dir = owner_dir / "jobs"
+            if not jobs_dir.is_dir():
+                continue
+            try:
+                entries = sorted(jobs_dir.iterdir())
+            except OSError:
+                continue
+            for entry in entries:
+                if found >= 20:
+                    break
+                if not entry.is_dir() or entry.name.startswith("."):
+                    continue
+                if (entry / "progress.json").is_file():
+                    found += 1
+                    self._log(
+                        f"local workspace {entry.name} exists but is not "
+                        "claimed automatically; the API is authoritative"
+                    )
 
     def _sleep(self, seconds: float) -> None:
         if seconds > 0:
