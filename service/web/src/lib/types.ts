@@ -543,6 +543,13 @@ export interface EventWithJobOut extends EventOut {
   prep_type?: string | null;
 }
 
+/** A page of the account-wide activity feed. */
+export interface EventFeed {
+  items: EventWithJobOut[];
+  /** Opaque cursor for the next (older) page, or null on the last page. */
+  next_cursor: string | null;
+}
+
 // ---------------------------------------------------------------------------
 // Workflows (base systems + derived simulation jobs)
 // ---------------------------------------------------------------------------

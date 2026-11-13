@@ -22,6 +22,9 @@ import { lazyWithReload } from "./lib/lazy";
 const DashboardPage = lazyWithReload(() =>
   import("./pages/DashboardPage").then((m) => ({ default: m.DashboardPage })),
 );
+const ActivityPage = lazyWithReload(() =>
+  import("./pages/ActivityPage").then((m) => ({ default: m.ActivityPage })),
+);
 const JobDetailPage = lazyWithReload(() =>
   import("./pages/JobDetailPage").then((m) => ({ default: m.JobDetailPage })),
 );
@@ -141,6 +144,7 @@ export default function App() {
       <Routes>
         <Route element={<ProtectedLayout />}>
           <Route path="/" element={<DashboardPage />} />
+          <Route path="/activity" element={<ActivityPage />} />
           <Route path="/jobs" element={<JobsPage />} />
           <Route path="/jobs/:id" element={<JobDetailPage />} />
           <Route path="/new" element={<NewJobPage />} />

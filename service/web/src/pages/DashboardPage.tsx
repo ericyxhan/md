@@ -3,7 +3,6 @@ import {
   Activity,
   AlertTriangle,
   ArrowRight,
-  Bell,
   CheckCircle2,
   Clock3,
   Cpu,
@@ -116,7 +115,9 @@ export function DashboardPage() {
   const navigate = useNavigate();
   const jobs = useJobs(undefined, 50);
   const capabilities = useCapabilities();
-  const events = useEvents(30);
+  // The overview keeps only a short summary of the history; the full,
+  // paged feed lives on the Activity page.
+  const events = useEvents(5);
   const prepJobs = usePrepJobs();
 
   if (jobs.isLoading) {
@@ -349,12 +350,15 @@ export function DashboardPage() {
         <Card className="overflow-hidden">
           <CardHeader
             title="Activity"
-            description="Everything that has happened across your simulations, newest first."
+            description="The five most recent events across your simulations."
             action={
-              <span className="inline-flex items-center gap-1 text-[11.5px] text-faint">
-                <Bell className="size-3.5" />
-                {events.data?.length ?? 0} recent
-              </span>
+              <Link
+                to="/activity"
+                className="inline-flex items-center gap-1.5 text-[12px] font-medium text-brand-700 transition hover:text-brand-800"
+              >
+                View all activity
+                <ArrowRight className="size-3.5" />
+              </Link>
             }
           />
           {events.isLoading ? (

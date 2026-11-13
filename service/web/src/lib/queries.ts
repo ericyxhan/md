@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   getArtifacts,
   getCapabilities,
@@ -232,8 +232,33 @@ export function useWorkflow(id: string | undefined) {
 
 export function useEvents(limit = 50) {
   return useQuery({
-    queryKey: [...queryKeys.eventFeed, limit],
-    queryFn: () => getEvents(limit),
+    queryKey: [...queryKeys.eventFeed, "recent", limit] as const,
+    queryFn: async () => (await getEvents({ limit })).items,
+    staleTime: 10_000,
+  });
+}
+
+export interface EventFeedFilters {
+  /** Narrow the feed to one MD job or preparation job. */
+  jobId?: string | null;
+  /** Narrow the feed to one event type, e.g. "failed". */
+  eventType?: string | null;
+  limit?: number;
+}
+
+/**
+ * The account-wide activity feed, paged backwards from the newest event.
+ * Pages are accumulated by "Load more"; each page carries an opaque cursor
+ * to the next older page.
+ */
+export function useEventFeed(filters: EventFeedFilters = {}) {
+  const { jobId = null, eventType = null, limit = 25 } = filters;
+  return useInfiniteQuery({
+    queryKey: [...queryKeys.eventFeed, "feed", jobId, eventType, limit] as const,
+    queryFn: ({ pageParam }) =>
+      getEvents({ limit, cursor: pageParam, jobId, eventType }),
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
     staleTime: 10_000,
   });
 }

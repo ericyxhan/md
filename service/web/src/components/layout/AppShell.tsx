@@ -2,6 +2,7 @@ import { useState } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
   Activity,
+  Bell,
   ChevronRight,
   FlaskConical,
   Gauge,
@@ -28,6 +29,7 @@ const workspaceNav = [
   { to: "/", label: "Overview", icon: Gauge, end: true },
   { to: "/jobs", label: "Simulations", icon: Activity, end: false },
   { to: "/workflows", label: "Workflows", icon: Layout, end: false },
+  { to: "/activity", label: "Activity", icon: Bell, end: false },
 ];
 
 // Ordered by the pipeline: system preparation produces the prepared system

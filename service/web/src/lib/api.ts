@@ -3,7 +3,7 @@ import type {
   Artifact,
   ArtifactList,
   Capabilities,
-  EventWithJobOut,
+  EventFeed,
   FileInspect,
   FileOut,
   Job,
@@ -540,13 +540,27 @@ export function deleteWorkflow(workflowId: string): Promise<void> {
 // Cross-job event feed (notification history)
 // ---------------------------------------------------------------------------
 
-export function getEvents(
-  limit?: number,
-  cursor?: string | null,
-): Promise<EventWithJobOut[]> {
+export interface EventFeedParams {
+  limit?: number;
+  /** Opaque cursor for the page older than the one last seen. */
+  cursor?: string | null;
+  /** Narrow the feed to a single MD job or preparation job. */
+  jobId?: string | null;
+  /** Narrow the feed to a single event type, e.g. "failed". */
+  eventType?: string | null;
+}
+
+export function getEvents({
+  limit,
+  cursor,
+  jobId,
+  eventType,
+}: EventFeedParams = {}): Promise<EventFeed> {
   const query = new URLSearchParams();
   if (limit) query.set("limit", String(limit));
   if (cursor) query.set("cursor", cursor);
+  if (jobId) query.set("job_id", jobId);
+  if (eventType) query.set("event_type", eventType);
   const suffix = query.toString();
-  return request<EventWithJobOut[]>(`/jobs/events${suffix ? `?${suffix}` : ""}`);
+  return request<EventFeed>(`/jobs/events${suffix ? `?${suffix}` : ""}`);
 }
