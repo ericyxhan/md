@@ -46,6 +46,8 @@ class StrictModel(BaseModel):
 # Simulation settings
 # ---------------------------------------------------------------------------
 
+Precision = Literal["mixed", "single", "double"]
+
 
 class IntegratorSpec(StrictModel):
     type: IntegratorType = "langevin_middle"
@@ -244,6 +246,11 @@ class JobCreate(StrictModel):
         default_factory=list, max_length=MAX_EQUILIBRATION_STAGES
     )
     production: ProductionSpec = Field(default_factory=ProductionSpec)
+    # Simulation precision. "mixed" is OpenMM's default and matches existing
+    # behavior; "double" trades speed for numerical robustness and is the
+    # right choice on older GPUs where mixed precision overwhelms the
+    # integrator with occasional NaN coordinates.
+    precision: Precision = "mixed"
 
     @model_validator(mode="after")
     def _at_least_one_stage(self) -> "JobCreate":

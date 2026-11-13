@@ -10,6 +10,7 @@ from ..policies import (
     INPUT_MODES,
     INTEGRATOR_TYPES,
     LIGAND_FORCEFIELD,
+    PRECISIONS,
 )
 from ..schemas import (
     IntegratorSpec,
@@ -42,6 +43,7 @@ def capabilities(
         },
         "integrators": list(INTEGRATOR_TYPES),
         "barostats": list(BAROSTAT_TYPES),
+        "precisions": list(PRECISIONS),
         "fixed_forcefields": list(FIXED_FORCEFIELDS),
         "ligand_forcefield": LIGAND_FORCEFIELD,
         "defaults": {

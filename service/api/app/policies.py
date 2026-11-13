@@ -39,6 +39,7 @@ FRICTION_INTEGRATORS = (
 )
 BAROSTAT_TYPES = ("none", "monte_carlo")
 INPUT_MODES = ("complex", "protein_ligands", "pdb_id")
+PRECISIONS = ("mixed", "single", "double")
 
 FIXED_FORCEFIELDS = ("amber14/protein.ff14SB.xml", "amber14/tip3p.xml")
 LIGAND_FORCEFIELD = "openff-2.3.0"
@@ -184,6 +185,7 @@ def build_canonical_spec(
         "minimization": request.minimization.model_dump(mode="json"),
         "equilibration": equilibration,
         "production": production,
+        "precision": request.precision,
         "total_steps": total_steps,
     }
 

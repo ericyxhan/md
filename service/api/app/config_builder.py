@@ -106,12 +106,17 @@ def build_config_document(
     root = Path(job_root)
     parameterization = canonical["parameterization"]
     minimization = canonical["minimization"]
+    precision = canonical.get("precision", "mixed")
+
+    run_table: dict[str, Any] = {
+        "output_dir": str(root / "outputs"),
+        "platform": settings.simulation_platform,
+    }
+    if precision != "mixed":
+        run_table["platform_properties"] = {"Precision": precision}
 
     document: dict[str, Any] = {
-        "run": {
-            "output_dir": str(root / "outputs"),
-            "platform": settings.simulation_platform,
-        },
+        "run": run_table,
         "input": _absolute_inputs(canonical, root),
         "parameterization": {
             "forcefields": list(FIXED_FORCEFIELDS),

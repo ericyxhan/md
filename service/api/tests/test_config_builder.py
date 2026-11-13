@@ -279,3 +279,58 @@ def test_config_path_candidates_handle_shallow_container_layout(
 
     assert candidates[0] == expected
     assert Path("/app/config.py") in candidates
+
+def test_precision_defaults_to_mixed_without_platform_properties(settings: Settings, tmp_path: Path) -> None:
+    request = JobCreate.model_validate(
+        {
+            "name": "mixed precision",
+            "input": {"mode": "complex", "complex_file_id": "file-1"},
+            "equilibration": [{"duration_ps": 0.02}],
+        }
+    )
+    assert request.precision == "mixed"
+
+    canonical = _canonical(request, settings)
+    assert canonical["precision"] == "mixed"
+
+    job_root = tmp_path / "jobs" / "mixed"
+    job_root.mkdir(parents=True)
+    path = write_config(canonical, job_root, settings)
+    generated = path.read_text()
+    assert "platform_properties" not in generated
+
+
+@pytest.mark.parametrize("precision", ["single", "double"])
+def test_precision_is_written_to_platform_properties(
+    settings: Settings, tmp_path: Path, precision: str
+) -> None:
+    request = JobCreate.model_validate(
+        {
+            "name": "explicit precision",
+            "input": {"mode": "complex", "complex_file_id": "file-1"},
+            "equilibration": [{"duration_ps": 0.02}],
+            "precision": precision,
+        }
+    )
+    canonical = _canonical(request, settings)
+    assert canonical["precision"] == precision
+
+    job_root = tmp_path / "jobs" / "explicit"
+    job_root.mkdir(parents=True)
+    path = write_config(canonical, job_root, settings)
+    generated = path.read_text()
+    assert f'Precision = "{precision}"' in generated
+
+    config = load_workflow_config(path)
+    assert dict(config.run.platform_properties) == {"Precision": precision}
+
+
+def test_precision_rejects_an_unknown_value() -> None:
+    with pytest.raises(ValidationError):
+        JobCreate.model_validate(
+            {
+                "name": "bad precision",
+                "input": {"mode": "complex", "complex_file_id": "file-1"},
+                "precision": "quadruple",
+            }
+        )
