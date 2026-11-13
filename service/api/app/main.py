@@ -14,6 +14,7 @@ from .middleware import RequestContextMiddleware
 from .observability import configure_logging
 from .ratelimit import TokenBucketRateLimiter
 from .routers import (
+    admin,
     capabilities,
     files,
     health,
@@ -114,6 +115,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         prefix="/api/v1",
         dependencies=[Depends(rate_limit)],
     )
+    api.include_router(admin.router)
     api.include_router(capabilities.router)
     api.include_router(files.router)
     api.include_router(jobs.router)

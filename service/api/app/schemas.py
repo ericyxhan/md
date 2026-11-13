@@ -447,6 +447,83 @@ class JobListOut(BaseModel):
     next_cursor: str | None = None
 
 
+class AdminJobOut(JobOut):
+    """A job as seen by an administrator: joined to the owning account."""
+
+    owner_id: str
+    owner_email: str
+    owner_first_name: str
+    owner_last_name: str
+    # True when the job is still claimed but its lease expired, or a
+    # cancellation was requested but the worker never acknowledged it —
+    # i.e. it is going to be reaped or needs a human.
+    stale: bool
+
+
+class AdminJobListOut(BaseModel):
+    items: list[AdminJobOut]
+    next_cursor: str | None = None
+
+
+class AdminWorkerHealthOut(BaseModel):
+    id: str
+    hostname: str
+    gpu_name: str | None
+    version: str | None
+    status: str
+    current_job_id: str | None
+    last_heartbeat_at: str
+    heartbeat_age_seconds: float
+    stale: bool
+
+
+class AdminDatabaseHealthOut(BaseModel):
+    reachable: bool
+    migration: str | None
+    jobs: int
+    users: int
+    files: int
+    audit_events: int
+    artifacts: int
+    artifact_bytes: int
+
+
+class AdminDataRootHealthOut(BaseModel):
+    path: str
+    free_bytes: int
+    min_free_bytes: int
+    users_bytes: int
+
+
+class AdminSystemOut(BaseModel):
+    generated_at: str
+    api_version: str
+    database: AdminDatabaseHealthOut
+    data_root: AdminDataRootHealthOut
+    workers: list[AdminWorkerHealthOut]
+    queue_counts: dict[str, int] = Field(default_factory=dict)
+
+
+class AdminAuditOut(BaseModel):
+    """One row of the audit trail, joined to the account it acted on."""
+
+    id: int
+    created_at: str
+    owner_id: str | None
+    owner_email: str | None
+    action: str
+    outcome: str
+    target_type: str | None
+    target_id: str | None
+    remote_addr: str | None
+    request_id: str | None
+
+
+class AdminAuditListOut(BaseModel):
+    items: list[AdminAuditOut]
+    next_cursor: str | None = None
+
+
 class EventOut(BaseModel):
     id: int
     type: str
