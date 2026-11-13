@@ -86,7 +86,7 @@ def claim(
                 raise APIError(
                     404, "file_not_found", f"Source file {input_file_id} not found"
                 )
-                source_path = str(storage.absolute_key(file_record.storage_key))
+            source_path = str(storage.absolute_key(file_record.storage_key))
 
         # Resolve ligand file paths so the worker can find them.
         steps = []

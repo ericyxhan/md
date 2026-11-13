@@ -107,6 +107,7 @@ def claim_prep(
         response_kwargs: dict[str, Any] = {
             "prep_job_id": job.id,
             "run_token": run_token,
+            "owner_id": job.owner_id,
             "job_type": job_type,
             "source_path": "",  # filled in by the router
             "work_dir": "",     # filled in by the router

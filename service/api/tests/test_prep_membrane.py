@@ -326,3 +326,117 @@ def test_prep_job_cancel_terminal(tmp_path):
         headers={"Authorization": f"Bearer {TEST_TOKEN}"},
     )
     assert cancel2.json()["status"] == "canceled"
+
+
+def test_internal_claim_returns_a_valid_response(tmp_path):
+    """Regression: the claim response used to miss the required owner_id.
+
+    The prep worker hit 500 Internal Server Error on every claim because the
+    temporary response built inside claim_prep() lacked the owner_id field
+    that PrepClaimResponse requires.  Assert the whole claim round-trip ends
+    in a claim the worker can act on, including the file-path resolution
+    the router performs after the service hands the job over.
+    """
+    from conftest import ADMIN_OWNER_ID
+
+    client, _ = _client(tmp_path, packmol_path="/usr/bin/packmol-memgen")
+    upload = client.post(
+        "/api/v1/files",
+        headers={"Authorization": f"Bearer {TEST_TOKEN}"},
+        files={"file": ("protein.pdb", b"HEADER\nEND\n", "chemical/x-pdb")},
+    )
+    file_id = upload.json()["id"]
+
+    queued = client.post(
+        "/api/v1/prep/membrane",
+        headers={"Authorization": f"Bearer {TEST_TOKEN}"},
+        json={
+            "protein_file_id": file_id,
+            "lipid": "POPC",
+            "box_padding_nm": 1.5,
+        },
+    )
+    assert queued.status_code == 200
+    prep_job_id = queued.json()["prep_job_id"]
+
+    claim = client.post(
+        "/internal/v1/prep/claim",
+        headers={"X-Worker-Token": "test-worker-token"},
+        json={"worker_id": "prep-0"},
+    )
+    assert claim.status_code == 200
+    body = claim.json()
+    assert body["prep_job_id"] == prep_job_id
+    assert body["owner_id"] == ADMIN_OWNER_ID
+    assert body["work_dir"].endswith(prep_job_id)
+    assert body["source_path"], "claim did not resolve the source path"
+
+    # A second claim finds the queue empty and returns 204.
+    again = client.post(
+        "/internal/v1/prep/claim",
+        headers={"X-Worker-Token": "test-worker-token"},
+        json={"worker_id": "prep-0"},
+    )
+    assert again.status_code == 204
+
+
+def test_internal_claim_of_a_system_prep_job(tmp_path):
+    """Regression: system_prep claims crashed the worker with an empty error.
+
+    The internal claim route had a misplaced line — ``source_path`` was
+    only assigned inside the ``if file_record is None:`` branch, after the
+    ``raise``, so it was never set. Every system_prep claim left the
+    workspace source unresolved and the worker died on
+    ``assert claim.source_path is not None`` with the empty AssertionError
+    message.
+    """
+    from conftest import ADMIN_OWNER_ID
+
+    client, _ = _client(tmp_path, packmol_path="/usr/bin/packmol-memgen")
+    upload = client.post(
+        "/api/v1/files",
+        headers={"Authorization": f"Bearer {TEST_TOKEN}"},
+        files={
+            "file": (
+                "protein.pdb",
+                b"HEADER\nATOM      1  N   ALA A   1       0.000   0.000   0.000\nEND\n",
+                "chemical/x-pdb",
+            )
+        },
+    )
+    file_id = upload.json()["id"]
+
+    queued = client.post(
+        "/api/v1/prep/system-prep",
+        headers={"Authorization": f"Bearer {TEST_TOKEN}"},
+        json={
+            "name": "strip everything",
+            "input_file_id": file_id,
+            "steps": [{"operation": "select_chain", "chain_to_keep": "A"}],
+        },
+    )
+    assert queued.status_code == 200, queued.text
+    prep_job_id = queued.json()["prep_job_id"]
+
+    claim = client.post(
+        "/internal/v1/prep/claim",
+        headers={"X-Worker-Token": "test-worker-token"},
+        json={"worker_id": "prep-0"},
+    )
+    assert claim.status_code == 200
+    body = claim.json()
+    assert body["prep_job_id"] == prep_job_id
+    assert body["owner_id"] == ADMIN_OWNER_ID
+    assert body["job_type"] == "system_prep"
+
+    # The paths must be absolute and inside the account's own tree.
+    from pathlib import Path
+
+    data_root = Path(tmp_path / "data").resolve()
+    assert body["source_path"] is not None
+    source = Path(body["source_path"])
+    assert source.is_absolute()
+    assert source.is_file()
+    assert source.is_relative_to(data_root)
+
+    assert isinstance(body["steps"], list) and body["steps"]
