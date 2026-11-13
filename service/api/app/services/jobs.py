@@ -536,6 +536,8 @@ def list_events_across_jobs(
     *,
     limit: int,
     cursor: str | None,
+    job_id: str | None = None,
+    event_type: str | None = None,
 ) -> tuple[list[dict[str, Any]], str | None]:
     """List recent events across all jobs and prep jobs owned by ``owner_id``.
 
@@ -543,6 +545,10 @@ def list_events_across_jobs(
     (``job_events`` is keyed by MD job id, ``prep_events`` by prep job id),
     but the user-facing activity feed shows both.  Events are ordered by
     creation time, newest first.
+
+    ``job_id`` narrows the feed to one job, which may be either an MD job or a
+    preparation job.  ``event_type`` narrows it to one kind of event, so a
+    reader can ask for only the failures.
     """
     from ..models import Job, JobEvent, PrepEvent, PrepJob
 
@@ -563,6 +569,14 @@ def list_events_across_jobs(
         .order_by(PrepEvent.created_at.desc(), PrepEvent.id.desc())
         .limit(limit + 1)
     )
+
+    if job_id is not None:
+        job_statement = job_statement.where(JobEvent.job_id == job_id)
+        prep_statement = prep_statement.where(PrepEvent.prep_job_id == job_id)
+
+    if event_type is not None:
+        job_statement = job_statement.where(JobEvent.type == event_type)
+        prep_statement = prep_statement.where(PrepEvent.type == event_type)
 
     if cursor is not None:
         try:
@@ -628,6 +642,25 @@ def list_events_across_jobs(
         next_cursor = f"{last['created_at']}|{last['id']}"
 
     return rows, next_cursor
+
+
+def feed_target_exists(session: Session, owner_id: str, job_id: str) -> bool:
+    """Return whether ``job_id`` is a job the caller owns.
+
+    The activity feed covers MD jobs and preparation jobs at once, so a
+    ``job_id`` filter has to be allowed to name either.  This is what makes
+    the filter safe: a job belonging to somebody else is not found, so the
+    caller gets the same empty answer they would from any other ownership
+    check.
+    """
+
+    from ..models import Job, PrepJob
+
+    job = session.get(Job, job_id)
+    if job is not None and job.owner_id == owner_id:
+        return True
+    prep_job = session.get(PrepJob, job_id)
+    return prep_job is not None and prep_job.owner_id == owner_id
 
 # ---------------------------------------------------------------------------
 # Dry validation

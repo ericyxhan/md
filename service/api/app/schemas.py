@@ -465,6 +465,17 @@ class EventWithJobOut(EventOut):
     prep_type: str | None = None
 
 
+class EventFeedOut(BaseModel):
+    """One page of the account-wide activity feed.
+
+    ``next_cursor`` is opaque and is passed back as the ``cursor`` query
+    parameter to fetch the following page.  It is ``None`` on the last page.
+    """
+
+    items: list[EventWithJobOut]
+    next_cursor: str | None = None
+
+
 class ArtifactOut(BaseModel):
     id: str
     stage_name: str | None = None

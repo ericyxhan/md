@@ -99,7 +99,7 @@ def test_prep_job_activity_appears_in_the_account_event_feed(tmp_path):
         headers={"Authorization": f"Bearer {TEST_TOKEN}"},
     )
     assert feed.status_code == 200
-    events = feed.json()
+    events = feed.json()["items"]
 
     created = [e for e in events if e["source"] == "prep"]
     assert created, "prep job produced no activity-feed entries"

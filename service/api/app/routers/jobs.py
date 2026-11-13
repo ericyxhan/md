@@ -13,6 +13,7 @@ from ..errors import APIError
 from ..schemas import (
     ArtifactListOut,
     ArtifactOut,
+    EventFeedOut,
     EventOut,
     EventWithJobOut,
     JobCreate,
@@ -43,6 +44,7 @@ from ..services.artifacts import (
 )
 from ..services.jobs import (
     create_job,
+    feed_target_exists,
     get_owned_job,
     job_to_dict,
     list_events,
@@ -128,22 +130,38 @@ def list_all(
     )
 
 
-@router.get("/events", response_model=list[EventWithJobOut])
+@router.get("/events", response_model=EventFeedOut)
 def list_events_all(
     limit: int = Query(default=50, ge=1, le=200),
     cursor: str | None = Query(default=None),
+    job_id: str | None = Query(default=None),
+    event_type: str | None = Query(default=None),
     owner: str = Depends(require_owner),
     session: Session = Depends(get_session),
-) -> list[EventWithJobOut]:
+) -> EventFeedOut:
     """Recent events across all jobs owned by the caller.
 
     Returns events joined with their parent job, newest first, so a user
     can scan a single notification history and click through to any job.
+    ``job_id`` narrows the feed to one job and ``event_type`` to one kind of
+    event.  Follow ``next_cursor`` to page backwards through the history.
     """
-    events, _next_cursor = list_events_across_jobs(
-        session, owner, limit=limit, cursor=cursor
+
+    if job_id is not None and not feed_target_exists(session, owner, job_id):
+        raise APIError(404, "job_not_found", f"Job {job_id!r} was not found")
+
+    events, next_cursor = list_events_across_jobs(
+        session,
+        owner,
+        limit=limit,
+        cursor=cursor,
+        job_id=job_id,
+        event_type=event_type,
     )
-    return [EventWithJobOut.model_validate(event) for event in events]
+    return EventFeedOut(
+        items=[EventWithJobOut.model_validate(event) for event in events],
+        next_cursor=next_cursor,
+    )
 
 
 @router.get("/{job_id}", response_model=JobOut)
