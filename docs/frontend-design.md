@@ -51,10 +51,16 @@ docking, free-energy calculations, and property prediction without a redesign.
 | **Computational chemist** | Configures protocols | Adjust ensemble, temperature, pressure, run length, integrator; retry from a stage |
 | **Automation / CI** | Machine client | Unchanged: `Authorization: Bearer` against `/api/v1` |
 
-The UI assumes a **shared lab login**. Every browser session is mapped to the
-single owner `local`; attribution is by convention, not by user account. This is
-deliberate for v1 and is the main boundary to revisit when per-user history
-matters.
+The UI assumes **real accounts**. Every browser session is mapped to one
+account, and every upload, simulation, and preparation belongs to it. A reader
+creates their own account with an email address, a first name, a last name,
+and a password; the account the lab used before accounts existed is the
+administrator and keeps everything it produced.
+
+Administrators get one extra page, the accounts list, where they can
+deactivate an account, promote one, and reset a password. It is guarded on the
+client so a reader who follows the wrong link sees an explanation rather than
+a raw `403`.
 
 ## 3. Product principles
 
@@ -82,11 +88,23 @@ matters.
 
 Sidebar:
 
-- **Workspace** — Overview, Simulations
-- **Platform** — System preparation, Docking, Free energy, Property prediction
-  (marked “Soon”; present today to reserve the information architecture)
-- Active workflow card — “Molecular dynamics”
-- Footer — shared lab identity, sign out, API version
+- **Workspace** — Overview, Simulations, Workflows. The user's own work: the
+  simulations they have run and the workflows that group them.
+- **Preparation** — System preparation, Membrane embedding. The upstream steps
+  that produce a system to simulate, ordered by the pipeline: system
+  preparation produces the prepared system that membrane embedding then embeds
+  in a bilayer.
+- Coming soon — Docking, Free energy, Property prediction. Roadmap only; not
+  links, and not part of the navigation. The marketing site carries the same
+  list.
+- Active workflow card — “Molecular dynamics”, linking to the workflow list.
+- Footer — the reader's own name and address, which open the account page,
+  then sign out, then the API version
+
+The groups answer different questions. *Workspace* is “what am I working on?”,
+*Preparation* is “how do I get a system to work on?”. Mixing shipped features
+into a group that once meant “the roadmap” made both unreadable, so live
+features and roadmap items are now kept apart.
 
 The URL is the state. The job detail page owns tabs for overview, stages,
 events, logs, and artifacts so a link to a job is always shareable.
@@ -105,16 +123,28 @@ events, logs, and artifacts so a link to a job is always shareable.
 
 ## 5. Core flows
 
-### 5.1 Sign in
+### 5.1 Sign in and sign up
 
 1. The app requests `GET /api/v1/session`.
-2. Unauthenticated → login screen with the lab password.
+2. Unauthenticated → the sign-in screen, which asks for an email address and a
+   password. A link below the form opens the sign-up screen.
 3. `POST /api/v1/session` sets `md_session` (HttpOnly) and `md_csrf`
-   (readable), then returns the session description.
+   (readable), then returns the session description, including the account.
 4. Any `401` from the API dispatches `md:unauthorized`; the auth provider clears
-   local state and returns to login.
+   local state and returns to sign-in.
 5. Sign out calls `POST /api/v1/session/logout` with the CSRF header and clears
    both cookies.
+
+Sign-up asks for an email address, a first name, a last name, and a password
+with a confirmation. `POST /api/v1/users` creates the account and signs it in
+with the same cookies a returning reader gets, so nobody types the password
+twice. The two passwords are compared while the confirmation is being typed
+rather than only on submit: a button that is silently disabled tells the
+reader nothing about what is wrong.
+
+The account's own details are changed on the account page: name, email
+address, and password. Changing the password needs the current one, so a
+stolen cookie cannot be used to lock the owner out.
 
 ### 5.2 Start a simulation
 
@@ -168,7 +198,7 @@ a reload starts clean rather than silently resuming a half-configured system.
 
 ### 5.6 System preparation: membrane embedding
 
-The **System preparation** workspace (reachable from the sidebar) lets users
+The **System preparation** section (reachable from the sidebar) lets users
 embed a protein structure in a lipid bilayer before simulation. This is an
 optional step: users can still upload a raw structure directly into the MD
 wizard, but membrane proteins benefit from a pre-equilibrated bilayer.
@@ -326,19 +356,30 @@ shared URL. Instead, the FastAPI app now issues a signed browser session.
 
 ### 8.2 Login
 
-`POST /api/v1/session` with `{ "password": "..." }`:
+`POST /api/v1/session` with `{ "email": "...", "password": "..." }`:
 
-- compares against `WEB_PASSWORD` or a scrypt `WEB_PASSWORD_HASH`
-  (constant-time);
+- looks the account up by its normalized address and compares the password
+  against the scrypt hash stored in the `users` table (constant-time);
+- spends the same hashing work when the account does not exist, so a missing
+  account and a wrong password cannot be told apart;
 - is rate-limited per client IP (`WEB_LOGIN_ATTEMPTS_PER_MINUTE`);
 - sets `md_session` — HttpOnly, `SameSite=Lax`, `Secure` by default, path `/`,
   TTL `WEB_SESSION_TTL_SECONDS`;
 - sets `md_csrf` — readable by JavaScript, same lifetime and flags;
-- returns owner, issue time, expiry, and auth method.
+- returns owner, issue time, expiry, auth method, and the account.
 
 Sessions are stateless: HMAC-SHA256 over a base64url JSON payload containing
 subject, issued-at, expiry, and a nonce. The key is `WEB_SESSION_SECRET`, falling
 back to `SERVICE_API_TOKEN`. Rotating the secret invalidates all sessions.
+
+The subject of a session is the account id, which is also the `owner_id` of
+everything that account creates. The lookup happens on every request, so
+deactivating an account takes effect at once instead of at the next sign-in.
+
+Registration (`POST /api/v1/users`) is public and rate limited per client
+address. `REGISTRATION_ENABLED=false` closes it, and
+`REQUIRE_ADMIN_APPROVAL=true` holds new accounts inactive until an
+administrator activates them.
 
 ### 8.3 Authorization
 
@@ -351,6 +392,12 @@ Cookie-authenticated mutating requests (`POST`, `PUT`, `PATCH`, `DELETE`) must
 echo the readable `md_csrf` value in `X-CSRF-Token`. The check is
 constant-time. `SameSite=Lax` plus double-submit is sufficient for this
 single-origin deployment; no CORS credentials are required.
+
+Every authenticated route resolves the caller to one account id, and every row
+that belongs to somebody carries that id as its `owner_id`. The account id is
+also part of the path on disk (`DATA_ROOT/users/<owner_id>/…`), so a mistake in
+an ownership check cannot reach another account's files either. The
+administrator routes additionally require `is_admin`.
 
 The SPA sends `credentials: "same-origin"` and adds the CSRF header
 automatically for mutations, including the XHR upload path.
@@ -372,7 +419,9 @@ automatically for mutations, including the XHR upload path.
 The backend is MD-specific today, but the UI separates **workflow** from
 **platform shell**:
 
-- The sidebar reserves a “Platform” group for future workspaces.
+- The sidebar reserves a “Preparation” group for the pipeline that feeds a
+  simulation, separate from the “Workspace” group that holds the user's own
+  simulations and workflows.
 - The job model is generic: name, status, stages, events, logs, artifacts.
   New workflows can reuse the same overview, list, detail, and result pages.
 - The new-job wizard is organized by workflow-specific steps behind a shared
@@ -415,6 +464,9 @@ badge. That keeps the promise visible without shipping dead ends.
 | Launch workflow variants | `POST /api/v1/workflows/{id}/variants` |
 | System preparation | `POST /api/v1/prep/system-prep`; `GET /api/v1/prep/jobs/{id}` |
 | Membrane embedding | `POST /api/v1/prep/membrane`; `GET /api/v1/prep/jobs/{id}` |
+| Sign up | `POST /api/v1/users` |
+| Own account | `GET`, `PATCH /api/v1/users/me` |
+| Accounts (administrator) | `GET /api/v1/users`; `GET`, `PATCH /api/v1/users/{id}` |
 
 Wire types mirror `service/api/app/schemas.py` and live in
 `src/lib/types.ts`. When the contract changes, update both sides together.
@@ -434,14 +486,16 @@ The Compose stack has five services: `migrate`, `api`, `worker`, `prep-worker`,
   the internal API. It requires `PACKMOL_PATH` and the packmol-memgen Python
   package.
 
-Browser login requires `WEB_PASSWORD` or `WEB_PASSWORD_HASH`, plus a signing
-secret. Membrane embedding requires `PACKMOL_PATH` set to the packmol-memgen
-executable. See `service/.env.example` for the full set.
+Browser sign-in requires `ADMIN_PASSWORD_HASH` (or the pre-accounts
+`WEB_PASSWORD_HASH`), plus a signing secret. Registration is open by default
+and is closed with `REGISTRATION_ENABLED=false`. Membrane embedding requires
+`PACKMOL_PATH` set to the packmol-memgen executable. See
+`service/.env.example` for the full set.
 
 ```bash
 cd service
 cp .env.example .env
-# Set SERVICE_API_TOKEN, WORKER_TOKEN, WEB_PASSWORD (or hash),
+# Set SERVICE_API_TOKEN, WORKER_TOKEN, ADMIN_PASSWORD_HASH (or hash),
 # WEB_SESSION_SECRET, PACKMOL_PATH, MD_SERVICE_DOMAIN, and host paths.
 docker compose --env-file .env up -d --build
 ```
@@ -496,6 +550,7 @@ export DATABASE_URL="sqlite:///$PWD/dev.db"
 export DATA_ROOT="$PWD/dev-data"
 export SERVICE_API_TOKEN="dev-service-token"
 export WORKER_TOKEN="dev-worker-token"
+# The administrator's password.  WEB_PASSWORD is the pre-accounts fallback.
 export WEB_PASSWORD="dev-lab-password"
 export WEB_SESSION_SECRET="dev-session-secret"
 export WEB_COOKIE_SECURE="false"
@@ -517,7 +572,10 @@ npm run dev
 
 ### Phase 1 — shipped
 
-- Shared-login session gateway and CSRF protection
+- Per-user accounts: self-service registration, sign-in by email address, an
+  account page, and per-account isolation of every upload, simulation, and
+  preparation
+- Session gateway and CSRF protection
 - Overview, simulations list, job detail with live stages/events/progress
 - Four-step new-simulation wizard with validation
 - Artifact and log inspection
@@ -545,10 +603,10 @@ npm run dev
 
 ### Phase 4 — collaboration
 
-- Per-user accounts and attributions
 - Shareable read-only links (signed, expiring)
 - Comments and run annotations
 - Exportable run reports
+- Project workspaces that group several people's runs
 
 ## 15. Quality checklist
 

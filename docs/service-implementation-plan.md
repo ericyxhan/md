@@ -7,6 +7,14 @@ existing simulation workflow (`simulate.py`, `stages.py`, `config.py`,
 `parameterization.py`, `output_bundle.py`) is the execution engine and must not
 be rewritten into the API process.
 
+> **Note on ownership.** This plan was written for a single shared owner
+> (`owner_id` = `local`) behind one lab password. The service now has real
+> accounts: every row and every file belongs to one account, the account id is
+> part of the path on disk, and the old shared owner became the administrator.
+> The ownership model below still holds — `owner_id` is the same column and the
+> same check — but the value is now an account id rather than the literal
+> `local`. See "Accounts" in [`../service/README.md`](../service/README.md).
+
 ## 1. Scope
 
 Build a service that lets a frontend:

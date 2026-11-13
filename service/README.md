@@ -36,6 +36,12 @@ Implemented in this repository:
 - API and worker images, a one-shot migration service, a Compose stack with
   host bind mounts, healthchecks, and a Caddy reverse proxy that hides
   `/internal/*`.
+- User accounts: an email address, a first name, a last name, and a password
+  of the reader's choosing. Every upload, job, preparation, workflow, and
+  audit row belongs to exactly one account, and every file lives inside that
+  account's own directory under `DATA_ROOT`. The account the lab used before
+  accounts existed is the administrator, and the data it produced stays
+  reachable after the upgrade.
 - Worker tests with a fake API and fake runner, including success, failure,
   cancellation, escalation, stale tokens, and unsafe claim paths.
 - Artifact listing and ID-only downloads with ownership checks and confined,
@@ -49,9 +55,10 @@ Implemented in this repository:
 - Queue and free-disk admission checks plus opt-in retention and orphan
   cleanup hooks.
 - A backup/restore runbook and a tested SQLite `.backup` restore path.
-- A same-origin React web console (`service/web/`) with a shared-lab login,
-  signed HttpOnly sessions, CSRF protection, guided job creation, live progress,
-  logs, events, and artifact downloads. The frontend design is in
+- A same-origin React web console (`service/web/`) with account sign-in and
+  self-service registration, signed HttpOnly sessions, CSRF protection, guided
+  job creation, live progress, logs, events, and artifact downloads. The
+  frontend design is in
   [`../docs/frontend-design.md`](../docs/frontend-design.md).
 - System preparation: membrane embedding via Packmol-Memgen (`POST
   /api/v1/prep/membrane`, `GET /api/v1/prep/jobs/{id}`). Upload a protein
@@ -83,7 +90,7 @@ a non-root worker and add it to the required device groups before relying on
 that in production:
 
 ```bash
-sudo mkdir -p /srv/md-service/{db,data/uploads,data/jobs,data/cache,backups}
+sudo mkdir -p /srv/md-service/{db,data/users,data/cache,backups}
 sudo chown -R 10001:10001 /srv/md-service
 sudo chmod 750 /srv/md-service
 ```
@@ -94,8 +101,8 @@ Create `service/.env` from `.env.example`, then start the stack:
 cd service
 cp .env.example .env
 # Set SERVICE_API_TOKEN, WORKER_TOKEN, MD_SERVICE_DOMAIN, and host paths.
-# Set WEB_PASSWORD (or WEB_PASSWORD_HASH) and WEB_SESSION_SECRET for the
-# browser console. Generate each token separately, for example:
+# Set ADMIN_PASSWORD_HASH (or WEB_PASSWORD_HASH) and WEB_SESSION_SECRET for
+# the browser console. Generate each token separately, for example:
 #   python -c 'import secrets; print(secrets.token_urlsafe(48))'
 docker compose --env-file .env up -d --build
 docker compose ps
@@ -105,6 +112,111 @@ Caddy publishes only `/api/*` (currently `/api/v1/*`), `/healthz`, and the
 single-page app; `/internal/*` always returns 404. The API and web containers
 are not published on host ports. For local API development without Caddy, run
 Uvicorn and Vite directly as shown below.
+
+## Accounts
+
+The service is open to anyone who can reach it. A reader creates their own
+account with an email address, a first name, a last name, and a password of
+their choosing; there is no shared lab password any more.
+
+### Creating an account
+
+Registration lives at `POST /api/v1/users` and is public. The web console
+offers it on the sign-in page ("Create an account"). The account is signed in
+immediately, so a new reader does not type the password twice.
+
+```bash
+curl -s -X POST -H "Content-Type: application/json" \
+  -d '{"email":"ada@example.com","first_name":"Ada","last_name":"Lovelace","password":"correct horse battery"}' \
+  "$BASE/users"
+```
+
+The response is the account without its password hash, and the session
+cookies are set on the response, exactly as they are after a sign-in.
+
+Two deployment settings control who may join:
+
+- `REGISTRATION_ENABLED=false` closes registration. Accounts are then created
+  by an administrator, with `scripts/create_account.py` or the administrator
+  console.
+- `REQUIRE_ADMIN_APPROVAL=true` creates accounts inactive. They cannot sign
+  in until an administrator activates them.
+
+Registration is rate limited per client address and the sign-in form is rate
+limited per client address, so a public endpoint cannot be used to guess
+passwords or to fill the accounts table with junk.
+
+### Signing in
+
+`POST /api/v1/session` takes the email address and the password and returns
+the signed session cookies. `GET /api/v1/session` describes the current
+session, including the account it belongs to.
+
+```bash
+curl -s -X POST -H "Content-Type: application/json" \
+  -d '{"email":"ada@example.com","password":"correct horse battery"}' \
+  "$BASE/session"
+```
+
+Passwords are stored as self-describing scrypt hashes: the work factors are
+part of the hash, so they can be raised later without invalidating the
+passwords that are already stored. The plaintext is never written to disk.
+
+### The administrator
+
+The administrator is an ordinary account with `is_admin` set. It can
+
+- list every account, with the number of jobs, files, and preparations each
+  one owns;
+- deactivate an account, which signs it out and blocks new sign-ins without
+  touching the data it produced;
+- promote another account to administrator; and
+- reset an account's password.
+
+The administrator console is at `/admin/users` in the web console, and the
+API is at `/api/v1/users` (`GET`, `GET /{id}`, `PATCH /{id}`). The API refuses
+a non-administrator with 403.
+
+An administrator cannot deactivate or demote itself, so a deployment cannot
+be left without somebody who can undo a mistake.
+
+Machine clients are unaffected: `SERVICE_API_TOKEN` still authenticates
+against the public API, and it acts as the administrator. That is what keeps
+the CLI examples in this README working.
+
+### Upgrading an existing deployment
+
+The account the lab used before accounts existed becomes the administrator,
+and everything it produced moves to it.
+
+1. `alembic upgrade head` runs migration `0009`, which creates the `users`
+   table, inserts the administrator, and re-points the `owner_id` of every
+   existing job, file, preparation, workflow, and audit row at it. The
+   administrator's id is fixed (`00000000-0000-4000-8000-000000000001`) so it
+   never has to be rewritten again.
+2. The administrator's password is the lab password. `ADMIN_PASSWORD_HASH`
+   wins; when it is empty `WEB_PASSWORD_HASH` is used, and a plaintext
+   `WEB_PASSWORD` is hashed once, during the migration.
+3. The data on disk moves from the flat layout into the account's directory:
+
+   ```bash
+   docker compose -f compose.yml run --rm --no-deps api \
+       python /app/scripts/migrate_user_data.py --dry-run
+   docker compose -f compose.yml run --rm --no-deps api \
+       python /app/scripts/migrate_user_data.py
+   ```
+
+   The script is idempotent: anything already in the new layout is left
+   alone, so it can be run again after a partial failure.
+
+`scripts/set-admin-password.sh` sets the administrator's password and
+rewrites `.env` with only the hash in it.
+
+The stored hash is the authoritative one: the API leaves an administrator's
+password alone once one is set, so that a password changed from the account
+page survives a restart. The script therefore updates the account as well as
+`.env`, running the update inside the API container as the service account.
+It prints the new password once when it generates one.
 
 ## Shared contract
 
@@ -552,9 +664,9 @@ New jobs are rejected with `429 queue_limit_exceeded` when the owner already has
 Retention is opt-in. `RETENTION_DAYS=0` keeps every job and artifact. When set,
 the cleanup task removes terminal jobs older than the window together with their
 SQLite rows and job workspace. Audit rows are intentionally retained. It also
-removes abandoned `jobs/.<id>.tmp` directories and `uploads/**/*.part` files
-older than `ORPHAN_WORKSPACE_HOURS`. Run a dry run first, preferably while the
-API and worker are idle:
+removes abandoned `users/*/jobs/.<id>.tmp` directories and
+`users/*/uploads/**/*.part` files older than `ORPHAN_WORKSPACE_HOURS`. Run a
+dry run first, preferably while the API and worker are idle:
 
 ```bash
 cd service/api
@@ -611,7 +723,7 @@ To do it by hand instead:
    ```bash
    docker compose down
    cp /srv/md-service/backups/app-<timestamp>.db /srv/md-service/db/app.db
-   rm -rf /srv/md-service/data/jobs /srv/md-service/data/uploads
+   rm -rf /srv/md-service/data/users /srv/md-service/data/cache
    tar -C /srv/md-service -xzf /srv/md-service/backups/data-<timestamp>.tgz
    chown -R 10001:10001 /srv/md-service/db /srv/md-service/data
    ```
@@ -628,9 +740,16 @@ and confirms the restored artifact files are readable.
 
 - Authentication uses constant-time comparisons. The public bearer token and
   the worker token are separate, and Caddy answers `/internal/*` with 404.
-- The browser password is stored only as a scrypt hash. `set-lab-password.sh`
-  writes the hash and removes the plaintext from `.env`; the hash is
-  single-quoted so compose does not interpolate its `$` separators.
+- Every account's password is stored only as a scrypt hash, never in
+  plaintext. `set-admin-password.sh` writes the hash and removes the
+  plaintext from `.env`; the hash is single-quoted so compose does not
+  interpolate its `$` separators.
+- Sign-in and registration are rate limited per client address, and every
+  authenticated request is rate limited per account.
+- Each account's data lives under `DATA_ROOT/users/<owner_id>/`, and every
+  route that reads or writes a row checks the caller against its `owner_id`.
+  The account id is part of the path, so a routing mistake cannot reach
+  another account's files either.
 - Request models use `extra="forbid"`. The public API accepts no raw TOML,
   filesystem path, executable, force-field path, platform, or platform
   property.
@@ -676,20 +795,30 @@ A failure there is treated as a server bug, not a user error.
 
 ## Data layout
 
+Every account owns its own tree, and the account id is part of the path as
+well as part of every database row. A mistake in an ownership check therefore
+cannot reach another account's files.
+
 ```text
 DATA_ROOT/
-├── uploads/<file_id>/<safe-name>
-├── jobs/<job_id>/
-│   ├── config.toml
-│   ├── job.json
-│   ├── inputs/
-│   ├── logs/
-│   └── outputs/            # created by simulate.py
+├── users/<owner_id>/
+│   ├── uploads/<file_id>/<safe-name>
+│   ├── jobs/<job_id>/
+│   │   ├── config.toml
+│   │   ├── job.json
+│   │   ├── inputs/
+│   │   ├── logs/
+│   │   └── outputs/            # created by simulate.py
+│   └── prep/<prep_job_id>/     # preparation workspaces
 └── cache/ccd/
 ```
 
 The database stores only paths relative to `DATA_ROOT`. The worker mounts only
 `DATA_ROOT`; the API is the only process that opens SQLite.
+
+Before accounts existed the tree was flat (`uploads/`, `jobs/`, `prep/`).
+`scripts/migrate_user_data.py` moves it into the per-account layout and
+rewrites the stored keys to match.
 
 ## Migrations
 
