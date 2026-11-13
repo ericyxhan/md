@@ -11,6 +11,7 @@ import {
   LogOut,
   Menu,
   Plus,
+  ScrollText,
   Settings,
   Shield,
   Users,
@@ -169,6 +170,24 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
               to="/admin/users"
               label="Accounts"
               icon={Users}
+              onNavigate={onNavigate}
+            />
+            <NavItem
+              to="/admin/jobs"
+              label="Platform queue"
+              icon={Gauge}
+              onNavigate={onNavigate}
+            />
+            <NavItem
+              to="/admin/system"
+              label="System health"
+              icon={Activity}
+              onNavigate={onNavigate}
+            />
+            <NavItem
+              to="/admin/audit"
+              label="Audit log"
+              icon={ScrollText}
               onNavigate={onNavigate}
             />
           </div>

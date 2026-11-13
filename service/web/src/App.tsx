@@ -55,6 +55,15 @@ const SystemPrepPage = lazyWithReload(
 const AdminUsersPage = lazyWithReload(
   () => import("./pages/AdminUsersPage").then((m) => ({ default: m.AdminUsersPage })),
 );
+const AdminJobsPage = lazyWithReload(
+  () => import("./pages/AdminJobsPage").then((m) => ({ default: m.AdminJobsPage })),
+);
+const AdminSystemPage = lazyWithReload(
+  () => import("./pages/AdminSystemPage").then((m) => ({ default: m.AdminSystemPage })),
+);
+const AdminAuditPage = lazyWithReload(
+  () => import("./pages/AdminAuditPage").then((m) => ({ default: m.AdminAuditPage })),
+);
 
 const AccountPage = lazyWithReload(
   () => import("./pages/AccountPage").then((m) => ({ default: m.AccountPage })),
@@ -160,6 +169,30 @@ export default function App() {
             element={
               <AdminRoute>
                 <AdminUsersPage />
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/jobs"
+            element={
+              <AdminRoute>
+                <AdminJobsPage />
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/system"
+            element={
+              <AdminRoute>
+                <AdminSystemPage />
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/audit"
+            element={
+              <AdminRoute>
+                <AdminAuditPage />
               </AdminRoute>
             }
           />

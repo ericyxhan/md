@@ -1,5 +1,8 @@
 import type {
   AdminUserInfo,
+  AdminSystemHealth,
+  AdminJobListOut,
+  AdminAuditListOut,
   Artifact,
   ArtifactList,
   Capabilities,
@@ -563,4 +566,40 @@ export function getEvents({
   if (eventType) query.set("event_type", eventType);
   const suffix = query.toString();
   return request<EventFeed>(`/jobs/events${suffix ? `?${suffix}` : ""}`);
+}
+
+// Cross-account administrator views
+
+export function listAdminJobs(
+  params: { status?: string | null; limit?: number; cursor?: string | null } = {},
+): Promise<AdminJobListOut> {
+  const query = new URLSearchParams();
+  if (params.status) query.set("status", params.status);
+  if (params.limit) query.set("limit", String(params.limit));
+  if (params.cursor) query.set("cursor", params.cursor);
+  const suffix = query.toString();
+  return request<AdminJobListOut>(`/admin/jobs${suffix ? `?${suffix}` : ""}`);
+}
+
+export function getAdminSystem(): Promise<AdminSystemHealth> {
+  return request<AdminSystemHealth>("/admin/system");
+}
+
+export function listAdminAudit(
+  params: {
+    action?: string | null;
+    outcome?: string | null;
+    ownerId?: string | null;
+    limit?: number;
+    cursor?: string | null;
+  } = {},
+): Promise<AdminAuditListOut> {
+  const query = new URLSearchParams();
+  if (params.action) query.set("action", params.action);
+  if (params.outcome) query.set("outcome", params.outcome);
+  if (params.ownerId) query.set("owner_id", params.ownerId);
+  if (params.limit) query.set("limit", String(params.limit));
+  if (params.cursor) query.set("cursor", params.cursor);
+  const suffix = query.toString();
+  return request<AdminAuditListOut>(`/admin/audit${suffix ? `?${suffix}` : ""}`);
 }

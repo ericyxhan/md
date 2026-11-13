@@ -393,6 +393,80 @@ export interface AdminUserInfo extends UserInfo {
   };
 }
 
+// Cross-account administrator views
+
+export interface AdminJob extends Job {
+  owner_id: string;
+  owner_email: string;
+  owner_first_name: string;
+  owner_last_name: string;
+  /** True when the job is going nowhere: cancel requested and never
+      acknowledged, or a worker lease expired without a heartbeat. */
+  stale: boolean;
+}
+
+export interface AdminJobListOut {
+  items: AdminJob[];
+  next_cursor: string | null;
+}
+
+export interface AdminWorkerHealth {
+  id: string;
+  hostname: string;
+  gpu_name: string | null;
+  version: string | null;
+  status: string;
+  current_job_id: string | null;
+  last_heartbeat_at: string;
+  heartbeat_age_seconds: number;
+  stale: boolean;
+}
+
+export interface AdminDatabaseHealth {
+  reachable: boolean;
+  migration: string | null;
+  jobs: number;
+  users: number;
+  files: number;
+  audit_events: number;
+  artifacts: number;
+  artifact_bytes: number;
+}
+
+export interface AdminDataRootHealth {
+  path: string;
+  free_bytes: number;
+  min_free_bytes: number;
+  users_bytes: number;
+}
+
+export interface AdminSystemHealth {
+  generated_at: string;
+  api_version: string;
+  database: AdminDatabaseHealth;
+  data_root: AdminDataRootHealth;
+  workers: AdminWorkerHealth[];
+  queue_counts: Record<string, number>;
+}
+
+export interface AdminAuditEntry {
+  id: number;
+  created_at: string;
+  owner_id: string | null;
+  owner_email: string | null;
+  action: string;
+  outcome: string;
+  target_type: string | null;
+  target_id: string | null;
+  remote_addr: string | null;
+  request_id: string | null;
+}
+
+export interface AdminAuditListOut {
+  items: AdminAuditEntry[];
+  next_cursor: string | null;
+}
+
 export interface SessionInfo {
   authenticated: boolean;
   owner?: string | null;

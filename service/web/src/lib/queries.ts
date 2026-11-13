@@ -18,6 +18,9 @@ import {
   listWorkflows,
   getWorkflow,
   getEvents,
+  getAdminSystem,
+  listAdminJobs,
+  listAdminAudit,
 } from "./api";
 import { isActive, isTerminal } from "./utils";
 import type {
@@ -45,6 +48,13 @@ export const queryKeys = {
   workflows: ["workflows"] as const,
   workflow: (id: string) => ["workflow", id] as const,
   eventFeed: ["event-feed"] as const,
+  adminJobs: (status?: string) => ["admin", "jobs", status ?? "all"] as const,
+  adminSystem: ["admin", "system"] as const,
+  adminAudit: (filter: {
+    action: string | null;
+    outcome: string | null;
+    ownerId: string | null;
+  }) => ["admin", "audit", filter] as const,
 };
 
 export function useCapabilities() {
@@ -264,3 +274,49 @@ export function useEventFeed(filters: EventFeedFilters = {}) {
 }
 
 export type { JobEvent };
+
+// ---------------------------------------------------------------------------
+// Cross-account administrator views
+// ---------------------------------------------------------------------------
+
+export type AdminJobFilter = "all" | "queued" | "running" | "failed";
+
+export function useAdminJobs(status: AdminJobFilter = "all") {
+  return useQuery({
+    queryKey: queryKeys.adminJobs(status === "all" ? undefined : status),
+    queryFn: () =>
+      listAdminJobs({ status: status === "all" ? undefined : status, limit: 50 }),
+    refetchInterval: 10_000,
+  });
+}
+
+export function useAdminSystem() {
+  return useQuery({
+    queryKey: queryKeys.adminSystem,
+    queryFn: getAdminSystem,
+    refetchInterval: 30_000,
+  });
+}
+
+export interface AdminAuditFilter {
+  action?: string | null;
+  outcome?: string | null;
+  ownerId?: string | null;
+  limit?: number;
+}
+
+/** The append-only audit trail, paged newest-first. */
+export function useAdminAudit(filter: AdminAuditFilter = {}) {
+  const { action = null, outcome = null, ownerId = null, limit = 50 } = filter;
+  return useInfiniteQuery({
+    queryKey: [
+      ...queryKeys.adminAudit({ action, outcome, ownerId }),
+      limit,
+    ] as const,
+    queryFn: ({ pageParam }) =>
+      listAdminAudit({ action, outcome, ownerId, limit, cursor: pageParam }),
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
+    staleTime: 10_000,
+  });
+}
