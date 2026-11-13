@@ -1,4 +1,5 @@
 import type {
+  AdminUserInfo,
   Artifact,
   ArtifactList,
   Capabilities,
@@ -23,6 +24,7 @@ import type {
   SeriesOut,
   SystemPrepOut,
   SystemPrepRequest,
+  UserInfo,
   ViewList,
   WorkflowCreate,
   WorkflowDetailOut,
@@ -146,17 +148,17 @@ async function request<T>(
 }
 
 // ---------------------------------------------------------------------------
-// Session
+// Session and accounts
 // ---------------------------------------------------------------------------
 
 export function getSession(): Promise<SessionInfo> {
   return request<SessionInfo>("/session");
 }
 
-export function login(password: string): Promise<SessionInfo> {
+export function login(email: string, password: string): Promise<SessionInfo> {
   return request<SessionInfo>("/session", {
     method: "POST",
-    body: { password },
+    body: { email, password },
   });
 }
 
@@ -164,6 +166,61 @@ export function logout(): Promise<void> {
   return request<void>("/session/logout", {
     method: "POST",
     expect: "none",
+  });
+}
+
+export interface RegisterPayload {
+  email: string;
+  first_name: string;
+  last_name: string;
+  password: string;
+}
+
+export function register(payload: RegisterPayload): Promise<UserInfo> {
+  return request<UserInfo>("/users", {
+    method: "POST",
+    body: payload,
+  });
+}
+
+export function getMe(): Promise<UserInfo> {
+  return request<UserInfo>("/users/me");
+}
+
+export interface ProfileUpdate {
+  first_name?: string;
+  last_name?: string;
+  email?: string;
+  password?: string;
+  current_password?: string;
+}
+
+export function updateMe(payload: ProfileUpdate): Promise<UserInfo> {
+  return request<UserInfo>("/users/me", {
+    method: "PATCH",
+    body: payload,
+  });
+}
+
+export function listUsers(): Promise<AdminUserInfo[]> {
+  return request<AdminUserInfo[]>("/users");
+}
+
+export interface AdminUserUpdate {
+  first_name?: string;
+  last_name?: string;
+  is_active?: boolean;
+  is_admin?: boolean;
+  password?: string;
+}
+
+export function adminUpdateUser(
+  userId: string,
+  payload: AdminUserUpdate,
+): Promise<AdminUserInfo> {
+  return request<AdminUserInfo>(`/users/${encodeURIComponent(userId)}`, {
+    method: "PATCH",
+    body: payload,
   });
 }
 

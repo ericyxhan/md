@@ -373,12 +373,33 @@ export interface JobSpec {
   total_steps: number;
 }
 
+export interface UserInfo {
+  id: string;
+  email: string;
+  first_name: string;
+  last_name: string;
+  is_admin: boolean;
+  is_active: boolean;
+  created_at: string;
+  last_login_at?: string | null;
+}
+
+export interface AdminUserInfo extends UserInfo {
+  updated_at: string;
+  usage: {
+    jobs: number;
+    files: number;
+    prep_jobs: number;
+  };
+}
+
 export interface SessionInfo {
   authenticated: boolean;
   owner?: string | null;
   issued_at?: string | null;
   expires_at?: string | null;
   auth_method?: string | null;
+  user?: UserInfo | null;
 }
 
 export type RetryMode =

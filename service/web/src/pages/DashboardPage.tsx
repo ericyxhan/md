@@ -112,7 +112,7 @@ function SkeletonCards() {
 }
 
 export function DashboardPage() {
-  const { session } = useAuth();
+  const { user } = useAuth();
   const navigate = useNavigate();
   const jobs = useJobs(undefined, 50);
   const capabilities = useCapabilities();
@@ -167,7 +167,7 @@ export function DashboardPage() {
     <div>
       <PageHeader
         eyebrow={today}
-        title={`${greeting()}, ${session?.owner === "local" ? "lab" : session?.owner ?? "lab"}`}
+        title={`${greeting()}, ${user?.first_name ?? "lab"}`}
         description="Launch simulations, follow live progress, and collect finished trajectories from one place."
         actions={
           <Button

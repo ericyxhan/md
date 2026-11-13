@@ -5,19 +5,20 @@ import { Button } from "../components/ui/Button";
 import { TextInput } from "../components/ui/Form";
 import { Logo } from "../components/layout/Logo";
 
-export function LoginPage() {
+export function LoginPage({ onRegister }: { onRegister: () => void }) {
   const { signIn, error: connectionError } = useAuth();
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!password || pending) return;
+    if (!email || !password || pending) return;
     setPending(true);
     setError(null);
     try {
-      await signIn(password);
+      await signIn(email, password);
     } catch (cause) {
       setError(
         cause instanceof Error ? cause.message : "Could not sign in",
@@ -74,6 +75,7 @@ export function LoginPage() {
 
           <div className="mt-9 grid gap-3 text-[13px] text-brand-100/85">
             {[
+              "Your own account, your own simulations",
               "Guided system preparation with sensible defaults",
               "Live stage progress and checkpoint-safe cancellation",
               "Downloadable trajectories, states, and logs",
@@ -104,26 +106,42 @@ export function LoginPage() {
 
           <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-2.5 py-1 text-[11.5px] font-medium text-brand-700 ring-1 ring-inset ring-brand-200/70">
             <LockKeyhole className="size-3" />
-            Shared lab access
+            Account access
           </span>
 
           <h2 className="mt-4 text-[26px] font-semibold tracking-[-0.025em] text-ink">
             Welcome back
           </h2>
           <p className="mt-1.5 text-sm leading-relaxed text-muted">
-            Enter the lab password to open the simulation console.
+            Sign in with the email address you registered with.
           </p>
 
           <form onSubmit={submit} className="mt-7 space-y-4">
             <div>
-              <label className="field-label" htmlFor="lab-password">
-                Lab password
+              <label className="field-label" htmlFor="account-email">
+                Email address
               </label>
               <TextInput
-                id="lab-password"
+                id="account-email"
+                type="email"
+                autoComplete="email"
+                autoFocus
+                className="input-lg"
+                placeholder="you@example.com"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                aria-invalid={Boolean(error)}
+              />
+            </div>
+
+            <div>
+              <label className="field-label" htmlFor="account-password">
+                Password
+              </label>
+              <TextInput
+                id="account-password"
                 type="password"
                 autoComplete="current-password"
-                autoFocus
                 className="input-lg"
                 placeholder="••••••••••••"
                 value={password}
@@ -149,11 +167,22 @@ export function LoginPage() {
               className="w-full"
               loading={pending}
               trailingIcon={<ArrowRight className="size-4" />}
-              disabled={!password}
+              disabled={!email || !password}
             >
-              Continue
+              Sign in
             </Button>
           </form>
+
+          <p className="mt-6 text-center text-[13px] text-muted">
+            New here?{" "}
+            <button
+              type="button"
+              onClick={onRegister}
+              className="font-medium text-brand-700 hover:text-brand-800"
+            >
+              Create an account
+            </button>
+          </p>
 
           <div className="mt-8 flex items-start gap-2.5 rounded-xl border border-line bg-surface/70 px-3.5 py-3">
             <Atom className="mt-0.5 size-4 shrink-0 text-muted" />

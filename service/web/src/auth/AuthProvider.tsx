@@ -9,15 +9,17 @@ import {
 } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import * as api from "../lib/api";
-import type { SessionInfo } from "../lib/types";
+import type { SessionInfo, UserInfo } from "../lib/types";
 
 type AuthStatus = "loading" | "authenticated" | "anonymous";
 
 interface AuthContextValue {
   status: AuthStatus;
   session: SessionInfo | null;
+  user: UserInfo | null;
   error: string | null;
-  signIn: (password: string) => Promise<void>;
+  signIn: (email: string, password: string) => Promise<void>;
+  signUp: (payload: api.RegisterPayload) => Promise<void>;
   signOut: () => Promise<void>;
   refresh: () => Promise<void>;
 }
@@ -60,9 +62,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refresh, queryClient]);
 
   const signIn = useCallback(
-    async (password: string) => {
-      const info = await api.login(password);
+    async (email: string, password: string) => {
+      const info = await api.login(email, password);
       setSession(info);
+      setStatus("authenticated");
+      setError(null);
+      await queryClient.invalidateQueries();
+    },
+    [queryClient],
+  );
+
+  const signUp = useCallback(
+    async (payload: api.RegisterPayload) => {
+      const account = await api.register(payload);
+      // The server signs the new account in; read the session back so the
+      // console shows the same state a returning user would get.
+      const info = await api.getSession();
+      setSession(
+        info.authenticated ? info : { authenticated: true, user: account },
+      );
       setStatus("authenticated");
       setError(null);
       await queryClient.invalidateQueries();
@@ -84,8 +102,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [queryClient]);
 
   const value = useMemo(
-    () => ({ status, session, error, signIn, signOut, refresh }),
-    [status, session, error, signIn, signOut, refresh],
+    () => ({
+      status,
+      session,
+      user: session?.user ?? null,
+      error,
+      signIn,
+      signUp,
+      signOut,
+      refresh,
+    }),
+    [status, session, error, signIn, signUp, signOut, refresh],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

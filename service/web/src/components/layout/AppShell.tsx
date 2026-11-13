@@ -2,8 +2,6 @@ import { useState } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
   Activity,
-  Atom,
-  Boxes,
   ChevronRight,
   FlaskConical,
   Gauge,
@@ -14,7 +12,7 @@ import {
   Plus,
   Settings,
   Shield,
-  TestTubes,
+  Users,
   X,
 } from "lucide-react";
 import { useAuth } from "../../auth/AuthProvider";
@@ -22,19 +20,26 @@ import { cn } from "../../lib/utils";
 import { Button } from "../ui/Button";
 import { Logo } from "./Logo";
 
-const primaryNav = [
+// The sidebar is grouped by what the user is working on, then by the
+// pipeline that feeds it.  "Workspace" holds their own simulations and the
+// workflows that group them; "Preparation" holds the upstream steps that
+// produce a system to simulate.
+const workspaceNav = [
   { to: "/", label: "Overview", icon: Gauge, end: true },
   { to: "/jobs", label: "Simulations", icon: Activity, end: false },
+  { to: "/workflows", label: "Workflows", icon: Layout, end: false },
 ];
 
-const futureNav = [
+// Ordered by the pipeline: system preparation produces the prepared system
+// that membrane embedding then embeds in a bilayer.
+const preparationNav = [
   { to: "/prep/system-prep", label: "System preparation", icon: Layers },
   { to: "/prep/membrane", label: "Membrane embedding", icon: Shield },
-  { to: "/workflows", label: "Workflows", icon: Layout },
-  { label: "Docking", icon: Boxes },
-  { label: "Free energy", icon: Atom },
-  { label: "Property prediction", icon: TestTubes },
 ];
+
+// Roadmap only.  These are not navigation targets, so they are not links;
+// the marketing site carries the same list.
+const roadmap = ["Docking", "Free energy", "Property prediction"];
 
 function NavItem({
   to,
@@ -82,11 +87,19 @@ function NavItem({
 }
 
 function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
-  const { signOut, session } = useAuth();
+  const { signOut, user } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
   const isNewJob = location.pathname.startsWith("/new");
+
+  // The initials are what the avatar shows: two letters, from the first
+  // and last name, or from the email address when there is no name.
+  const initials = (
+    user
+      ? `${user.first_name.charAt(0)}${user.last_name.charAt(0)}`.toUpperCase()
+      : "··"
+  ).trim();
 
   return (
     <div className="flex h-full flex-col">
@@ -122,45 +135,44 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
           Workspace
         </p>
         <div className="space-y-0.5">
-          {primaryNav.map((item) => (
+          {workspaceNav.map((item) => (
             <NavItem key={item.to} {...item} onNavigate={onNavigate} />
           ))}
         </div>
 
         <p className="px-2.5 pb-1.5 pt-6 text-[10.5px] font-semibold uppercase tracking-[0.13em] text-faint">
-          Platform
+          Preparation
         </p>
         <div className="space-y-0.5">
-          {futureNav.map((item) => {
-            const hasRoute = "to" in item && !!item.to;
-            if (hasRoute) {
-              return (
-                <NavItem
-                  key={item.to}
-                  to={item.to}
-                  label={item.label}
-                  icon={item.icon}
-                  onNavigate={onNavigate}
-                />
-              );
-            }
-            return (
-              <div
-                key={item.label}
-                className="flex h-9 cursor-not-allowed items-center gap-2.5 rounded-lg px-2.5 text-[13.5px] font-medium text-faint/80"
-                title="Planned workspace"
-              >
-                <item.icon className="size-4 shrink-0" />
-                <span className="flex-1 truncate">{item.label}</span>
-                <span className="rounded-full bg-ink/[0.05] px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-wide text-faint">
-                  Soon
-                </span>
-              </div>
-            );
-          })}
+          {preparationNav.map((item) => (
+            <NavItem key={item.to} {...item} onNavigate={onNavigate} />
+          ))}
         </div>
 
-        <div className="mt-6 rounded-xl border border-dashed border-line-strong bg-surface/60 p-3">
+        <div className="mt-6 px-2.5">
+          <p className="text-[10.5px] font-semibold uppercase tracking-[0.13em] text-faint">
+            Coming soon
+          </p>
+          <p className="mt-1 text-[11.5px] leading-relaxed text-muted">
+            {roadmap.join(" · ")}
+          </p>
+        </div>
+
+        {user?.is_admin ? (
+          <div className="mt-5 px-2.5">
+            <p className="text-[10.5px] font-semibold uppercase tracking-[0.13em] text-faint">
+              Administration
+            </p>
+            <NavItem
+              to="/admin/users"
+              label="Accounts"
+              icon={Users}
+              onNavigate={onNavigate}
+            />
+          </div>
+        ) : null}
+
+        <div className="mt-5 rounded-xl border border-dashed border-line-strong bg-surface/60 p-3">
           <div className="flex items-center gap-2 text-[12px] font-medium text-ink-soft">
             <FlaskConical className="size-3.5 text-brand-600" />
             Molecular dynamics
@@ -168,26 +180,39 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
           <p className="mt-1 text-[11.5px] leading-relaxed text-muted">
             Protein–ligand systems on a single GPU worker.
           </p>
-          <div className="mt-2.5 flex items-center gap-1 text-[11px] font-medium text-brand-700">
+          <NavLink
+            to="/workflows"
+            onClick={onNavigate}
+            className="mt-2.5 flex items-center gap-1 text-[11px] font-medium text-brand-700 hover:text-brand-800"
+          >
             Active workflow
             <ChevronRight className="size-3" />
-          </div>
+          </NavLink>
         </div>
       </nav>
 
       <div className="border-t border-line p-3">
         <div className="flex items-center gap-2.5 rounded-lg px-1.5 py-1.5">
-          <div className="flex size-8 items-center justify-center rounded-full bg-brand-100 text-[11px] font-semibold text-brand-800">
-            LAB
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-[12.5px] font-medium text-ink">
-              Shared lab
-            </p>
-            <p className="truncate text-[11px] text-faint">
-              {session?.owner ?? "local"} · session
-            </p>
-          </div>
+          {/* The identity block opens the account settings, where the name,
+              the address, and the password are changed. */}
+          <NavLink
+            to="/account"
+            onClick={onNavigate}
+            className="flex min-w-0 flex-1 items-center gap-2.5 rounded-lg"
+            title="Account settings"
+          >
+            <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-brand-100 text-[11px] font-semibold text-brand-800">
+              {initials || "··"}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-[12.5px] font-medium text-ink">
+                {user ? `${user.first_name} ${user.last_name}` : "Signed in"}
+              </p>
+              <p className="truncate text-[11px] text-faint">
+                {user?.email ?? "session"}
+              </p>
+            </div>
+          </NavLink>
           <button
             type="button"
             onClick={() => void signOut()}
