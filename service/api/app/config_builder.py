@@ -109,6 +109,28 @@ def _stage_table(stage: dict[str, Any]) -> dict[str, Any]:
     return table
 
 
+
+
+_BIOMOLECULE_FORCEFIELDS = {
+    "protein": "amber14/protein.ff14SB.xml",
+    "dna": "amber14/DNA.OL15.xml",
+    "rna": "amber14/RNA.OL3.xml",
+    "glycan": "amber14/GLYCAM_06j-1.xml",
+    "lipid": "amber14/lipid17.xml",
+}
+
+
+def _forcefields(biomolecule_types: list[str], solvent_model: str) -> list[str]:
+    forcefields: list[str] = []
+    for biomolecule_type in biomolecule_types:
+        path = _BIOMOLECULE_FORCEFIELDS.get(biomolecule_type)
+        if path is not None and path not in forcefields:
+            forcefields.append(path)
+    water_path = f"amber14/{solvent_model}.xml"
+    if water_path not in forcefields:
+        forcefields.append(water_path)
+    return forcefields
+
 def build_config_document(
     canonical: dict[str, Any],
     job_root: str | Path,
@@ -132,7 +154,10 @@ def build_config_document(
         "run": run_table,
         "input": _absolute_inputs(canonical, root),
         "parameterization": {
-            "forcefields": list(FIXED_FORCEFIELDS),
+            "forcefields": _forcefields(
+                parameterization["biomolecule_types"],
+                parameterization["solvent_model"],
+            ),
             "ligand_forcefield": LIGAND_FORCEFIELD,
             "ph": parameterization["ph"],
             "padding_nm": parameterization["padding_nm"],
@@ -151,6 +176,9 @@ def build_config_document(
                 "strip_crystallographic_waters"
             ],
             "strip_residues": list(parameterization["strip_residues"]),
+            "positive_ion": parameterization["positive_ion"],
+            "negative_ion": parameterization["negative_ion"],
+            "solvent_model": parameterization["solvent_model"],
             "ccd_cache": str(
                 Path(settings.data_root).expanduser().resolve() / "cache" / "ccd"
             ),

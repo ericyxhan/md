@@ -1538,6 +1538,9 @@ def prepare_system(
     replace_nonstandard_residues: bool,
     strip_crystallographic_waters: bool,
     strip_residues: tuple[str, ...],
+    positive_ion: str = "Na+",
+    negative_ion: str = "Cl-",
+    solvent_model: str = "tip3p",
 ) -> tuple[Path, Path, Path]:
     if (protein_path is None) == (complex_path is None):
         raise ValueError("Supply exactly one of protein_path or complex_path")
@@ -1604,8 +1607,18 @@ def prepare_system(
         protein_components,
     )
 
+    coverage_topology = topology
+    try:
+        coverage_modeller = Modeller(
+            topology, unit.Quantity(positions_nm, unit.nanometer)
+        )
+        coverage_modeller.addExtraParticles(forcefield)
+        coverage_topology = coverage_modeller.topology
+    except Exception:  # Some water models need no extra particles.
+        coverage_topology = topology
+
     coverage = check_topology_coverage(
-        topology,
+        coverage_topology,
         forcefield,
         path=source_path,
         forcefield_files=forcefields,
@@ -1684,11 +1697,16 @@ def prepare_system(
             flush=True,
         )
 
+    modeller.addExtraParticles(forcefield)
     modeller.addSolvent(
         forcefield,
+        model=solvent_model,
         padding=padding_nm,
         ionicStrength=ionic_strength_molar * unit.molar,
+        positiveIon=positive_ion,
+        negativeIon=negative_ion,
     )
+    modeller.addExtraParticles(forcefield)
     system = forcefield.createSystem(
         modeller.topology,
         nonbondedMethod=PME,
@@ -1796,6 +1814,21 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--positive-ion",
+        default="Na+",
+        help="Ion used to neutralize/ionic-strength the solvent box.",
+    )
+    parser.add_argument(
+        "--negative-ion",
+        default="Cl-",
+        help="Counter-ion used to neutralize/ionic-strength the solvent box.",
+    )
+    parser.add_argument(
+        "--solvent-model",
+        default="tip3p",
+        help="Water model passed to Modeller.addSolvent (tip3p, opc, ...).",
+    )
+    parser.add_argument(
         "--ligand-charge",
         action="append",
         type=_ligand_charge_argument,
@@ -1868,6 +1901,9 @@ def main(argv: list[str] | None = None) -> int:
         )
         if name
     )
+    positive_ion = args.positive_ion
+    negative_ion = args.negative_ion
+    solvent_model = args.solvent_model
 
     try:
         prepare_system(
@@ -1889,6 +1925,9 @@ def main(argv: list[str] | None = None) -> int:
             replace_nonstandard_residues=args.replace_nonstandard_residues,
             strip_crystallographic_waters=args.strip_crystallographic_waters,
             strip_residues=strip_residues,
+            positive_ion=positive_ion,
+            negative_ion=negative_ion,
+            solvent_model=solvent_model,
         )
     except (RuntimeError, ValueError) as exc:
         print(f"Error: {exc}", file=sys.stderr)

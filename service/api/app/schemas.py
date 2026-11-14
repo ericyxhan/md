@@ -195,6 +195,9 @@ class MinimizationSpec(StrictModel):
     )
 
 
+BiomoleculeType = Literal["protein", "dna", "rna", "glycan", "lipid"]
+
+
 class ParameterizationSpec(StrictModel):
     ph: float = Field(default=7.4, ge=0.0, le=14.0)
     padding_nm: float = Field(default=1.0, ge=0.5, le=2.0)
@@ -244,6 +247,27 @@ class ParameterizationSpec(StrictModel):
         ),
     )
 
+    positive_ion: str = Field(
+        default="Na+",
+        description="Ion used to neutralize and set ionic strength.",
+    )
+    negative_ion: str = Field(
+        default="Cl-",
+        description="Counter-ion used to neutralize and set ionic strength.",
+    )
+    solvent_model: str = Field(
+        default="tip3p",
+        description="Water model passed to Modeller.addSolvent.",
+    )
+    biomolecule_types: list[BiomoleculeType] = Field(
+        default_factory=lambda: ["protein"],
+        max_length=5,
+        description=(
+            "Biomolecule force-field modules to include. Protein is the "
+            "default; add DNA, RNA, glycan, or lipid support as needed."
+        ),
+    )
+
     @model_validator(mode="after")
     def _validate_preparation_cleanup(self) -> "ParameterizationSpec":
         for name in self.ligand_charges:
@@ -256,6 +280,21 @@ class ParameterizationSpec(StrictModel):
                 raise ValueError(
                     "strip_residues contains an empty residue name"
                 )
+        allowed_positive = {"Na+", "K+", "Li+", "Cs+", "Rb+"}
+        allowed_negative = {"Cl-", "Br-", "F-", "I-"}
+        if self.positive_ion not in allowed_positive:
+            raise ValueError("positive_ion must be a supported monovalent cation")
+        if self.negative_ion not in allowed_negative:
+            raise ValueError("negative_ion must be a supported monovalent anion")
+        allowed_solvent = {
+            "tip3p", "spce", "tip4pew", "tip5p", "swm4ndp",
+        }
+        if self.solvent_model not in allowed_solvent:
+            raise ValueError("solvent_model must be a supported water model")
+        if not self.biomolecule_types:
+            raise ValueError("biomolecule_types must not be empty")
+        if len(set(self.biomolecule_types)) != len(self.biomolecule_types):
+            raise ValueError("biomolecule_types must be unique")
         return self
 
 

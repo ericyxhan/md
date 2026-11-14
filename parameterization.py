@@ -193,6 +193,12 @@ def build_parameterizer_command(
         str(settings.padding_nm),
         "--ionic-strength-molar",
         str(settings.ionic_strength_molar),
+        "--positive-ion",
+        settings.positive_ion,
+        "--negative-ion",
+        settings.negative_ion,
+        "--solvent-model",
+        settings.solvent_model,
         "--max-ligand-residues",
         str(settings.max_ligand_residues),
         "--ccd-cache",
@@ -263,6 +269,9 @@ def parameterization_fingerprint(
         "replace_nonstandard_residues": settings.replace_nonstandard_residues,
         "strip_crystallographic_waters": settings.strip_crystallographic_waters,
         "strip_residues": list(settings.strip_residues),
+        "positive_ion": settings.positive_ion,
+        "negative_ion": settings.negative_ion,
+        "solvent_model": settings.solvent_model,
     }
     digest.update(json.dumps(chemistry, sort_keys=True).encode("utf-8"))
     return digest.hexdigest()
@@ -293,6 +302,9 @@ def _manifest(
             "replace_nonstandard_residues": settings.replace_nonstandard_residues,
             "strip_crystallographic_waters": settings.strip_crystallographic_waters,
             "strip_residues": list(settings.strip_residues),
+            "positive_ion": settings.positive_ion,
+            "negative_ion": settings.negative_ion,
+            "solvent_model": settings.solvent_model,
         },
         "outputs": {
             "prepared_pdb": "metadata/prepared.pdb",

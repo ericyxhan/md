@@ -541,6 +541,9 @@ class ParameterizationConfig:
     replace_nonstandard_residues: bool = True
     strip_crystallographic_waters: bool = False
     strip_residues: tuple[str, ...] = ()
+    positive_ion: str = "Na+"
+    negative_ion: str = "Cl-"
+    solvent_model: str = "tip3p"
 
     def validate(self, context: str = "parameterization") -> None:
         if not self.forcefields:
@@ -578,6 +581,28 @@ class ParameterizationConfig:
                 raise ConfigError(
                     f"{context}.strip_residues contains an empty residue name"
                 )
+
+        allowed_positive_ions = {"Na+", "K+", "Li+", "Cs+", "Rb+"}
+        allowed_negative_ions = {"Cl-", "Br-", "F-", "I-"}
+        if self.positive_ion not in allowed_positive_ions:
+            raise ConfigError(
+                f"{context}.positive_ion must be one of: "
+                + ", ".join(sorted(allowed_positive_ions))
+            )
+        if self.negative_ion not in allowed_negative_ions:
+            raise ConfigError(
+                f"{context}.negative_ion must be one of: "
+                + ", ".join(sorted(allowed_negative_ions))
+            )
+
+        allowed_solvent_models = {
+            "tip3p", "spce", "tip4pew", "tip5p", "swm4ndp",
+        }
+        if self.solvent_model not in allowed_solvent_models:
+            raise ConfigError(
+                f"{context}.solvent_model must be one of: "
+                + ", ".join(sorted(allowed_solvent_models))
+            )
 
 
 @dataclass(frozen=True)
@@ -897,6 +922,9 @@ def _parse_parameterization(
             "replace_nonstandard_residues",
             "strip_crystallographic_waters",
             "strip_residues",
+            "positive_ion",
+            "negative_ion",
+            "solvent_model",
         },
         context,
     )
@@ -945,6 +973,9 @@ def _parse_parameterization(
             table, "strip_crystallographic_waters", False, context
         ),
         strip_residues=_residue_name_list(table, "strip_residues", context),
+        positive_ion=_string(table, "positive_ion", "Na+", context),
+        negative_ion=_string(table, "negative_ion", "Cl-", context),
+        solvent_model=_string(table, "solvent_model", "tip3p", context),
     )
     config.validate()
     return config

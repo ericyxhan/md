@@ -3,6 +3,7 @@ import { Droplets, FlaskConical, Info, ShieldCheck } from "lucide-react";
 import type { Capabilities } from "../../lib/types";
 import {
   Field,
+  Select,
   SuffixInput,
   TextInput,
   Toggle,
@@ -235,6 +236,101 @@ export function StepSystem({
               description="Map MSE, SEP, TPO, and similar modifications back to standard residues in long, mostly-standard chains. D-peptide and nonstandard-rich chains are left intact."
             />
           </div>
+          <Field
+            label="Positive ion"
+            hint="Ion used to neutralize the solvent box."
+            htmlFor="positive-ion"
+          >
+            <Select
+              id="positive-ion"
+              value={parameterization.positive_ion}
+              onChange={(event) =>
+                patch({ positive_ion: event.target.value })
+              }
+            >
+              {["Na+", "K+", "Li+", "Cs+", "Rb+"].map((ion) => (
+                <option key={ion} value={ion}>
+                  {ion}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field
+            label="Negative ion"
+            hint="Counter-ion used to neutralize the solvent box."
+            htmlFor="negative-ion"
+          >
+            <Select
+              id="negative-ion"
+              value={parameterization.negative_ion}
+              onChange={(event) =>
+                patch({ negative_ion: event.target.value })
+              }
+            >
+              {["Cl-", "Br-", "F-", "I-"].map((ion) => (
+                <option key={ion} value={ion}>
+                  {ion}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field
+            label="Solvent model"
+            hint="Water model passed to the solvent builder."
+            htmlFor="solvent-model"
+          >
+            <Select
+              id="solvent-model"
+              value={parameterization.solvent_model}
+              onChange={(event) =>
+                patch({ solvent_model: event.target.value })
+              }
+            >
+              {["tip3p", "spce", "tip4pew", "tip5p", "swm4ndp"].map(
+                (model) => (
+                  <option key={model} value={model}>
+                    {model}
+                  </option>
+                ),
+              )}
+            </Select>
+          </Field>
+          <Field
+            label="Biomolecule support"
+            hint="Force-field modules included in the prepared system."
+            htmlFor="biomolecule-types"
+          >
+            <div className="flex flex-wrap gap-3 pt-1">
+              {(["dna", "rna", "glycan", "lipid"] as const).map((type) => {
+                const checked =
+                  parameterization.biomolecule_types.includes(type);
+                return (
+                  <label
+                    key={type}
+                    className="inline-flex items-center gap-2 text-[12px] text-ink-soft"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={(event) => {
+                        const next = event.target.checked
+                          ? [...parameterization.biomolecule_types, type]
+                          : parameterization.biomolecule_types.filter(
+                              (item) => item !== type,
+                            );
+                        patch({
+                          biomolecule_types: next.includes("protein")
+                            ? next
+                            : ["protein", ...next],
+                        });
+                      }}
+                    />
+                    {type.toUpperCase()}
+                  </label>
+                );
+              })}
+            </div>
+          </Field>
           <div className="flex items-end sm:col-span-2">
             <p className="flex items-start gap-1.5 text-[11.5px] leading-relaxed text-muted">
               <Info className="mt-0.5 size-3.5 shrink-0" />

@@ -170,6 +170,10 @@ export interface ParameterizationSpec {
   replace_nonstandard_residues: boolean;
   strip_crystallographic_waters: boolean;
   strip_residues: string[];
+  positive_ion: string;
+  negative_ion: string;
+  solvent_model: string;
+  biomolecule_types: Array<"protein" | "dna" | "rna" | "glycan" | "lipid">;
 }
 
 export interface InputSpec {

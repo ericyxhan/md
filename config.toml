@@ -80,6 +80,11 @@ strip_crystallographic_waters = false
 # case-insensitive.  Example: ["SO4", "GOL", "EDO", "NA"].
 strip_residues = []
 
+# Ions used to neutralize the solvent box and set ionic strength.
+positive_ion = "Na+"
+negative_ion = "Cl-"
+solvent_model = "tip3p"
+
 # Optional expected net charge per ligand.  Preparation fails when a ligand's
 # formal charges do not match.  Names may be the ligand residue name (L01),
 # its index, its report label, or its input file name.  Run once and read
