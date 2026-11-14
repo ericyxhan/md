@@ -112,6 +112,44 @@ def _string_list(
     return tuple(item.strip() for item in value)
 
 
+def _residue_name_list(
+    table: Mapping[str, Any], key: str, context: str
+) -> tuple[str, ...]:
+    """Parse a list of residue names, normalized for case-insensitive matching."""
+    names = _string_list(table, key, (), context)
+    normalized: list[str] = []
+    for name in names:
+        residue_name = name.strip().upper()
+        if residue_name not in normalized:
+            normalized.append(residue_name)
+    return tuple(normalized)
+
+
+def _ligand_charges(
+    table: Mapping[str, Any], key: str, context: str
+) -> tuple[tuple[str, int], ...]:
+    """Parse an optional ``ligand name = integer charge`` table.
+
+    Sorting the entries keeps the parameterization fingerprint (and therefore
+    the reuse cache) independent of the table's key order.
+    """
+    value = table.get(key, {})
+    if not isinstance(value, Mapping):
+        raise ConfigError(
+            f"{context}.{key} must be a table of ligand name = integer charge"
+        )
+    charges: list[tuple[str, int]] = []
+    for name, charge in value.items():
+        if not isinstance(name, str) or not name.strip():
+            raise ConfigError(f"{context}.{key} contains an invalid ligand name")
+        if isinstance(charge, bool) or not isinstance(charge, int):
+            raise ConfigError(
+                f"{context}.{key}.{name} must be an integer net charge"
+            )
+        charges.append((name.strip(), charge))
+    return tuple(sorted(charges))
+
+
 def _number(
     table: Mapping[str, Any],
     key: str,
@@ -461,6 +499,11 @@ class ParameterizationConfig:
     max_ligand_residues: int
     ccd_cache: Path
     reuse_existing: bool
+    ligand_charges: tuple[tuple[str, int], ...] = ()
+    strip_existing_hydrogens: bool = True
+    replace_nonstandard_residues: bool = True
+    strip_crystallographic_waters: bool = False
+    strip_residues: tuple[str, ...] = ()
 
     def validate(self, context: str = "parameterization") -> None:
         if not self.forcefields:
@@ -475,6 +518,29 @@ class ParameterizationConfig:
             raise ConfigError(f"{context}.ionic_strength_molar must be >= 0")
         if self.max_ligand_residues < 0:
             raise ConfigError(f"{context}.max_ligand_residues must be >= 0")
+
+        seen_ligands: set[str] = set()
+        for name, charge in self.ligand_charges:
+            if not name.strip():
+                raise ConfigError(
+                    f"{context}.ligand_charges contains an empty ligand name"
+                )
+            if name in seen_ligands:
+                raise ConfigError(
+                    f"{context}.ligand_charges contains ligand {name!r} twice"
+                )
+            seen_ligands.add(name)
+            if isinstance(charge, bool) or not isinstance(charge, int):
+                raise ConfigError(
+                    f"{context}.ligand_charges.{name} must be an integer net "
+                    "charge"
+                )
+
+        for name in self.strip_residues:
+            if not name.strip():
+                raise ConfigError(
+                    f"{context}.strip_residues contains an empty residue name"
+                )
 
 
 @dataclass(frozen=True)
@@ -759,6 +825,11 @@ def _parse_parameterization(
             "max_ligand_residues",
             "ccd_cache",
             "reuse_existing",
+            "ligand_charges",
+            "strip_existing_hydrogens",
+            "replace_nonstandard_residues",
+            "strip_crystallographic_waters",
+            "strip_residues",
         },
         context,
     )
@@ -796,6 +867,17 @@ def _parse_parameterization(
         ),
         ccd_cache=_resolve_path(ccd_cache_value, base_dir),
         reuse_existing=_boolean(table, "reuse_existing", True, context),
+        ligand_charges=_ligand_charges(table, "ligand_charges", context),
+        strip_existing_hydrogens=_boolean(
+            table, "strip_existing_hydrogens", True, context
+        ),
+        replace_nonstandard_residues=_boolean(
+            table, "replace_nonstandard_residues", True, context
+        ),
+        strip_crystallographic_waters=_boolean(
+            table, "strip_crystallographic_waters", False, context
+        ),
+        strip_residues=_residue_name_list(table, "strip_residues", context),
     )
     config.validate()
     return config

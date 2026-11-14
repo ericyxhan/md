@@ -58,6 +58,38 @@ max_ligand_residues = 50
 # ccd_cache = "~/.cache/openmm-parameterizer/ccd"
 reuse_existing = true
 
+# Delete hydrogens already present in protein/complex PDB/mmCIF inputs and
+# rebuild them from the residue templates and the pH above.  Set to false to
+# keep input hydrogens, for example when a complex carries a specific
+# protonation state.  Standalone ligand files keep their supplied protonation.
+strip_existing_hydrogens = true
+
+# Map recognised modified residues (MSE, SEP, TPO, ...) to their standard
+# counterparts when they belong to a mostly-standard polymer chain.  Short,
+# nonstandard-rich, or explicitly D-amino-acid chains are kept intact so
+# D-peptide ligands are not turned into L-peptides.  Set to false to keep every
+# modified residue as a ligand.
+replace_nonstandard_residues = true
+
+# Remove water molecules already present in the input before building the new
+# solvent box.  The default keeps them and prints a warning with the count.
+strip_crystallographic_waters = false
+
+# Remove input residues with these names before component classification.
+# Useful for buffer molecules, detergents, and unwanted ions.  Names are
+# case-insensitive.  Example: ["SO4", "GOL", "EDO", "NA"].
+strip_residues = []
+
+# Optional expected net charge per ligand.  Preparation fails when a ligand's
+# formal charges do not match.  Names may be the ligand residue name (L01),
+# its index, its report label, or its input file name.  Run once and read
+# metadata/parameterization.txt to see the assigned names.
+[parameterization.ligand_charges]
+# 7YAE: D-peptide + CLR + CLR
+# L01 = 2
+# L02 = 0
+# L03 = 0
+
 # ---------------------------------------------------------------------------
 # Energy minimization
 # ---------------------------------------------------------------------------

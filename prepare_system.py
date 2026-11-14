@@ -21,6 +21,15 @@ Two input modes are supported:
 
 The output is a topology/positions PDB and an OpenMM System XML that can be
 loaded in the CUDA simulation environment.
+
+PDB/mmCIF source structures are rebuilt rather than trusted blindly: existing
+hydrogens are removed and re-added at the requested pH, and recognised modified
+residues (MSE, SEP, ...) are mapped to standard residues in mainly-standard
+polymer chains.  Existing waters can be removed, and specific residue names
+(ions, buffers, detergents) can be stripped before component classification.
+Standalone ligand files keep their supplied protonation, and optionally
+validated net charges catch formal-charge mistakes before the expensive
+solvation step.
 """
 
 from __future__ import annotations
@@ -70,6 +79,52 @@ CHEM_TO_OMM_BOND = {
     Chem.BondType.AROMATIC: "AROMATIC",
 }
 _ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+# PDBFixer maps recognised modified residues (MSE, SEP, TPO, ...) to their
+# standard counterparts.  That is desirable for a modified protein chain but
+# destructive for a short D-peptide ligand: the same table maps DPN->PHE and
+# DTR->TRP, which would silently change the ligand's stereochemistry.  Only
+# treat modifications as post-translational when the chain is long enough and
+# mostly standard; otherwise leave the residues for SMIRNOFF/CCD.
+NONSTANDARD_SUBSTITUTION_MIN_RESIDUES = 20
+NONSTANDARD_SUBSTITUTION_MAX_FRACTION = 0.2
+
+# Names that explicitly encode a D-amino acid.  A chain containing one of these
+# must not be passed to PDBFixer's substituter, which would map them to the
+# corresponding L residue (for example DPN -> PHE).
+D_AMINO_ACID_RESIDUES = frozenset(
+    {
+        "DAH",
+        "DAL",
+        "DAR",
+        "DAS",
+        "DCY",
+        "DGL",
+        "DGN",
+        "DHA",
+        "DHI",
+        "DIL",
+        "DIV",
+        "DLE",
+        "DLY",
+        "DNP",
+        "DPN",
+        "DPR",
+        "DSN",
+        "DSP",
+        "DTH",
+        "DTR",
+        "DTY",
+        "DVA",
+    }
+)
+
+# Residue names used for water by common PDB, Amber, and GROMACS tools.  The
+# switch only removes waters present in the input; Modeller.addSolvent adds the
+# new solvent box later.
+WATER_RESIDUE_NAMES = frozenset(
+    {"HOH", "WAT", "H2O", "DOD", "SOL", "TIP", "TIP3", "TP3", "OH2", "SPC"}
+)
 
 
 def _base36(value: int, width: int = 2) -> str:
@@ -436,11 +491,184 @@ def _split_peptide_chains_at_gaps(
     return new_topology
 
 
+def _strip_unwanted_residues(
+    fixer: PDBFixer,
+    *,
+    path: Path,
+    strip_crystallographic_waters: bool,
+    strip_residues: tuple[str, ...],
+    warn_about_kept_waters: bool,
+) -> None:
+    """Remove input waters and user-named residues before PDBFixer processes them.
+
+    Filtering at this point avoids downloading CCD definitions or adding
+    hydrogens for buffer molecules that are about to be discarded.
+    """
+    requested = {
+        name.strip().upper() for name in strip_residues if name.strip()
+    }
+    water_count = 0
+    removed_waters = 0
+    removed_requested: dict[str, int] = {}
+    matched: set[str] = set()
+    to_delete = []
+
+    for residue in fixer.topology.residues():
+        name = residue.name.strip().upper()
+        is_water = name in WATER_RESIDUE_NAMES
+        if is_water:
+            water_count += 1
+        if name in requested:
+            matched.add(name)
+        if (strip_crystallographic_waters and is_water) or name in requested:
+            to_delete.append(residue)
+            if is_water:
+                removed_waters += 1
+            if name in requested:
+                removed_requested[name] = removed_requested.get(name, 0) + 1
+
+    if to_delete:
+        modeller = Modeller(fixer.topology, fixer.positions)
+        modeller.delete(to_delete)
+        fixer.topology = modeller.topology
+        fixer.positions = modeller.positions
+
+    if strip_crystallographic_waters and water_count:
+        print(
+            f"Removed {removed_waters} crystallographic water molecule(s) "
+            f"from {path.name}",
+            flush=True,
+        )
+    elif strip_crystallographic_waters:
+        print(f"No crystallographic waters found in {path.name}", flush=True)
+    elif warn_about_kept_waters and water_count > removed_waters:
+        print(
+            f"Warning: keeping {water_count - removed_waters} crystallographic "
+            f"water molecule(s) from {path.name}. Set "
+            "strip_crystallographic_waters = true (or pass --strip-waters) to "
+            "remove them.",
+            flush=True,
+        )
+
+    if removed_requested:
+        details = ", ".join(
+            f"{name} ({count})"
+            for name, count in sorted(removed_requested.items())
+        )
+        print(f"Removed residues from {path.name}: {details}", flush=True)
+
+    unmatched = requested - matched
+    if unmatched:
+        print(
+            f"Warning: strip_residues did not match any residues in "
+            f"{path.name}: {', '.join(sorted(unmatched))}",
+            flush=True,
+        )
+
+
+def _strip_existing_hydrogens(fixer: PDBFixer, *, path: Path) -> int:
+    """Delete every hydrogen so PDBFixer rebuilds them from templates and pH.
+
+    Hydrogens copied from another modelling tool can encode a different
+    protonation state or use atom names the force field does not expect.
+    Removing them before ``findMissingAtoms``/``addMissingHydrogens`` makes the
+    prepared structure depend on the heavy atoms, the residue templates, and
+    the requested pH instead of on stale input hydrogens.
+    """
+    hydrogens = [
+        atom
+        for atom in fixer.topology.atoms()
+        if atom.element == Element.getBySymbol("H")
+    ]
+    if not hydrogens:
+        return 0
+    modeller = Modeller(fixer.topology, fixer.positions)
+    modeller.delete(hydrogens)
+    fixer.topology = modeller.topology
+    fixer.positions = modeller.positions
+    print(
+        f"Rebuilding {len(hydrogens)} existing hydrogen(s) in {path.name} "
+        "from the force field and pH",
+        flush=True,
+    )
+    return len(hydrogens)
+
+
+def _replace_nonstandard_residues(fixer: PDBFixer, *, path: Path) -> None:
+    """Map modified residues in mostly-standard chains to standard residues.
+
+    Runs before component classification so an MSE-containing protein stays a
+    polymer instead of becoming one large SMIRNOFF ligand.  Chains that are
+    short, dominated by nonstandard residues, or that contain an explicit
+    D-amino acid are left alone, which keeps D-peptide ligands (for example
+    DPN/DTR in 7YAE) intact.
+    """
+    fixer.findNonstandardResidues()
+    if not fixer.nonstandardResidues:
+        return
+
+    replacements = dict(fixer.nonstandardResidues)
+    apply: list[tuple] = []
+    keep: list[tuple] = []
+    for chain in fixer.topology.chains():
+        residues = list(chain.residues())
+        chain_changes = [
+            (residue, replacements[residue])
+            for residue in residues
+            if residue in replacements
+        ]
+        if not chain_changes:
+            continue
+        standard_count = len(residues) - len(chain_changes)
+        fraction = len(chain_changes) / len(residues)
+        chain_has_d_residue = any(
+            residue.name in D_AMINO_ACID_RESIDUES for residue in residues
+        )
+        if (
+            not chain_has_d_residue
+            and standard_count > 0
+            and len(residues) >= NONSTANDARD_SUBSTITUTION_MIN_RESIDUES
+            and fraction <= NONSTANDARD_SUBSTITUTION_MAX_FRACTION
+        ):
+            apply.extend(chain_changes)
+        else:
+            keep.extend(chain_changes)
+
+    if apply:
+        fixer.nonstandardResidues = apply
+        description = ", ".join(
+            f"{residue.name}{residue.id}->{replacement}"
+            for residue, replacement in apply
+        )
+        print(
+            f"Replacing nonstandard residues in {path.name}: {description}",
+            flush=True,
+        )
+        fixer.replaceNonstandardResidues()
+    else:
+        fixer.nonstandardResidues = []
+
+    if keep:
+        description = ", ".join(
+            f"{residue.name}{residue.id}" for residue, _ in keep
+        )
+        print(
+            f"Keeping nonstandard residues in {path.name} as ligand material "
+            f"(short, nonstandard-rich, or D-amino-acid chain): {description}",
+            flush=True,
+        )
+
+
 def _read_pdb_fixer(
     path: Path,
     *,
     ph: float,
     add_missing_residues: bool,
+    strip_existing_hydrogens: bool,
+    replace_nonstandard_residues: bool,
+    strip_crystallographic_waters: bool,
+    strip_residues: tuple[str, ...],
+    warn_about_kept_waters: bool,
 ) -> tuple[Topology, unit.Quantity]:
     # A standalone PDB ligand may lack connectivity metadata.  PDBFixer needs
     # the links before it decides which terminal atoms to add.
@@ -460,12 +688,23 @@ def _read_pdb_fixer(
             filename=str(fixer_path),
             platform=cpu_platform,
         )
+        _strip_unwanted_residues(
+            fixer,
+            path=path,
+            strip_crystallographic_waters=strip_crystallographic_waters,
+            strip_residues=strip_residues,
+            warn_about_kept_waters=warn_about_kept_waters,
+        )
         fixer.findMissingResidues()
         if not add_missing_residues:
             fixer.missingResidues = {}
             fixer.topology = _split_peptide_chains_at_gaps(
                 fixer.topology, fixer.positions
             )
+        if strip_existing_hydrogens:
+            _strip_existing_hydrogens(fixer, path=path)
+        if replace_nonstandard_residues:
+            _replace_nonstandard_residues(fixer, path=path)
         fixer.findMissingAtoms()
         fixer.addMissingAtoms(seed=0)
         # addMissingHydrogens starts each new H at a random position and then
@@ -1071,7 +1310,17 @@ def _load_ligands(
             # "ligand".  PDBFixer + CCD provide the intra-residue bonds, and
             # peptide/disulfide links are inferred from geometry.
             topology, positions = _read_pdb_fixer(
-                path, ph=ph, add_missing_residues=add_missing_residues
+                path,
+                ph=ph,
+                add_missing_residues=add_missing_residues,
+                # A standalone ligand's protonation is part of its chemistry.
+                # Strip/rebuild only structures that are treated as protein or
+                # complex inputs.
+                strip_existing_hydrogens=False,
+                replace_nonstandard_residues=False,
+                strip_crystallographic_waters=False,
+                strip_residues=(),
+                warn_about_kept_waters=False,
             )
             positions_nm = [
                 positions[i].value_in_unit(unit.nanometer)
@@ -1097,6 +1346,94 @@ def _load_ligands(
     return ligands
 
 
+def _ligand_charge_argument(value: str) -> tuple[str, int]:
+    name, separator, charge_text = value.rpartition("=")
+    if not separator or not name.strip() or not charge_text.strip():
+        raise argparse.ArgumentTypeError(
+            f"expected NAME=CHARGE such as L01=-1, got {value!r}"
+        )
+    try:
+        charge = int(charge_text)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"charge in {value!r} must be an integer"
+        ) from exc
+    return name.strip(), charge
+
+
+def _validate_ligand_charges(
+    ligands: list[PreparedLigand],
+    expected_charges: list[tuple[str, int]],
+) -> dict[int, int]:
+    """Check user-specified ligand net charges against the prepared graphs.
+
+    Ligand names may be the generated residue name (``L01``), the ligand index
+    (``1``), the report label, or the input file name.  Ambiguous aliases are
+    rejected so a charge can never be attached to the wrong molecule.
+    """
+    if not expected_charges:
+        return {}
+    if not ligands:
+        raise RuntimeError(
+            "Ligand charges were specified but the input contains no ligands"
+        )
+
+    targets: dict[str, PreparedLigand] = {}
+    ambiguous: set[str] = set()
+    for ligand in ligands:
+        aliases = {
+            _ligand_residue_name(ligand.index),
+            str(ligand.index),
+            ligand.label,
+            Path(ligand.source).name,
+        }
+        for alias in aliases:
+            existing = targets.get(alias)
+            if existing is not None and existing is not ligand:
+                ambiguous.add(alias)
+            else:
+                targets[alias] = ligand
+    for alias in ambiguous:
+        targets.pop(alias, None)
+
+    available = ", ".join(
+        f"{_ligand_residue_name(ligand.index)} ({ligand.label})"
+        for ligand in ligands
+    )
+    validated: dict[int, int] = {}
+    seen: set[str] = set()
+    for name, expected in expected_charges:
+        if name in seen:
+            raise RuntimeError(f"Ligand charge for {name!r} was specified twice")
+        seen.add(name)
+        ligand = targets.get(name)
+        if ligand is None:
+            if name in ambiguous:
+                raise RuntimeError(
+                    f"Ligand name {name!r} is ambiguous; use the ligand residue "
+                    f"name instead. Available ligands: {available}"
+                )
+            raise RuntimeError(
+                f"Unknown ligand {name!r} in ligand_charges. "
+                f"Available ligands: {available}"
+            )
+        actual = int(round(float(ligand.molecule.total_charge.magnitude)))
+        if actual != expected:
+            raise RuntimeError(
+                f"Ligand {_ligand_residue_name(ligand.index)} ({ligand.label}) "
+                f"has net charge {actual}, but the configuration expects "
+                f"{expected}. Fix the ligand's formal charges/protonation, or "
+                "change [parameterization.ligand_charges] in config.toml."
+            )
+        validated[ligand.index] = expected
+        print(
+            f"Ligand {_ligand_residue_name(ligand.index)} net charge {actual} "
+            "matches the configured value",
+            flush=True,
+        )
+    return validated
+
+
 def _write_report(
     path: Path,
     *,
@@ -1109,6 +1446,11 @@ def _write_report(
     system: System,
     topology: Topology,
     ligand_forcefield: str,
+    ligand_charges: dict[int, int],
+    strip_existing_hydrogens: bool,
+    replace_nonstandard_residues: bool,
+    strip_crystallographic_waters: bool,
+    strip_residues: tuple[str, ...],
 ) -> None:
     lines = [
         "System preparation report",
@@ -1117,15 +1459,40 @@ def _write_report(
         f"Input mode: {source_mode}",
         "Protein force field: Amber",
         f"Ligand force field: {ligand_forcefield}",
+        "Hydrogen handling: "
+        + (
+            "strip and rebuild from templates and pH"
+            if strip_existing_hydrogens
+            else "keep input hydrogens"
+        ),
+        "Nonstandard residues: "
+        + (
+            "replace recognised modifications in mainly-standard chains"
+            if replace_nonstandard_residues
+            else "keep as ligand material"
+        ),
+        "Crystallographic waters: "
+        + (
+            "remove before solvation"
+            if strip_crystallographic_waters
+            else "keep input waters"
+        ),
+        "Residues removed from input: "
+        + (", ".join(strip_residues) if strip_residues else "none"),
         f"Ligand components detected in the input structure: {len(ligand_components)}",
     ]
     for label in component_labels:
         lines.append(f"  - {label}")
     lines.append(f"Ligand molecules parameterized: {len(ligands)}")
     for ligand in ligands:
+        expected = ligand_charges.get(ligand.index)
+        validation = (
+            f" (matches configured {expected})" if expected is not None else ""
+        )
         lines.append(
             f"  {ligand.index}. {ligand.label}: {ligand.molecule.n_atoms} atoms, "
-            f"charge {ligand.molecule.total_charge}, source {ligand.source}"
+            f"charge {ligand.molecule.total_charge}{validation}, "
+            f"source {ligand.source}"
         )
     lines.extend(
         [
@@ -1166,6 +1533,11 @@ def prepare_system(
     add_missing_residues: bool,
     allow_undefined_stereo: bool,
     max_ligand_residues: int,
+    ligand_charges: list[tuple[str, int]],
+    strip_existing_hydrogens: bool,
+    replace_nonstandard_residues: bool,
+    strip_crystallographic_waters: bool,
+    strip_residues: tuple[str, ...],
 ) -> tuple[Path, Path, Path]:
     if (protein_path is None) == (complex_path is None):
         raise ValueError("Supply exactly one of protein_path or complex_path")
@@ -1185,7 +1557,14 @@ def prepare_system(
     )
 
     source_topology, source_positions = _read_pdb_fixer(
-        source_path, ph=ph, add_missing_residues=add_missing_residues
+        source_path,
+        ph=ph,
+        add_missing_residues=add_missing_residues,
+        strip_existing_hydrogens=strip_existing_hydrogens,
+        replace_nonstandard_residues=replace_nonstandard_residues,
+        strip_crystallographic_waters=strip_crystallographic_waters,
+        strip_residues=strip_residues,
+        warn_about_kept_waters=True,
     )
     source_positions_nm = [
         source_positions[i].value_in_unit(unit.nanometer)
@@ -1274,6 +1653,7 @@ def prepare_system(
             )
         )
 
+    validated_charges = _validate_ligand_charges(ligands, ligand_charges)
     if ligands:
         ligand_chain = topology.addChain(_unused_chain_id(topology))
         for ligand in ligands:
@@ -1338,6 +1718,11 @@ def prepare_system(
         system=system,
         topology=modeller.topology,
         ligand_forcefield=ligand_forcefield,
+        ligand_charges=validated_charges,
+        strip_existing_hydrogens=strip_existing_hydrogens,
+        replace_nonstandard_residues=replace_nonstandard_residues,
+        strip_crystallographic_waters=strip_crystallographic_waters,
+        strip_residues=strip_residues,
     )
     print(f"Wrote {prepared_pdb}")
     print(f"Wrote {system_xml}")
@@ -1410,6 +1795,58 @@ def main(argv: list[str] | None = None) -> int:
             "is treated as a single ligand (default: 50; 0 disables the limit)."
         ),
     )
+    parser.add_argument(
+        "--ligand-charge",
+        action="append",
+        type=_ligand_charge_argument,
+        default=[],
+        metavar="NAME=CHARGE",
+        help=(
+            "Expected net charge for one ligand, for example L01=-1. NAME may "
+            "be the ligand residue name (L01), its index, its report label, or "
+            "its input file name. Repeat for each ligand to validate. Ligands "
+            "without an entry are not checked."
+        ),
+    )
+    parser.add_argument(
+        "--keep-existing-hydrogens",
+        dest="strip_existing_hydrogens",
+        action="store_false",
+        help=(
+            "Keep hydrogens already present in protein/complex PDB/mmCIF "
+            "inputs instead of stripping and rebuilding them from the "
+            "templates and pH."
+        ),
+    )
+    parser.add_argument(
+        "--keep-nonstandard-residues",
+        dest="replace_nonstandard_residues",
+        action="store_false",
+        help=(
+            "Do not map recognised modified residues (MSE, SEP, TPO, ...) in "
+            "protein chains to their standard counterparts."
+        ),
+    )
+    parser.add_argument(
+        "--strip-waters",
+        dest="strip_crystallographic_waters",
+        action="store_true",
+        help=(
+            "Remove water residues already present in the input before "
+            "building the new solvent box."
+        ),
+    )
+    parser.add_argument(
+        "--strip-residue",
+        dest="strip_residues",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help=(
+            "Remove every input residue with this name (for example SO4, GOL, "
+            "or NA) before component classification. Repeat as needed."
+        ),
+    )
     args = parser.parse_args(argv)
 
     # PDBFixer places new hydrogens at random positions and then minimizes
@@ -1424,6 +1861,13 @@ def main(argv: list[str] | None = None) -> int:
         "amber14/protein.ff14SB.xml",
         "amber14/tip3p.xml",
     ]
+    strip_residues = tuple(
+        name
+        for name in dict.fromkeys(
+            value.strip().upper() for value in args.strip_residues
+        )
+        if name
+    )
 
     try:
         prepare_system(
@@ -1440,6 +1884,11 @@ def main(argv: list[str] | None = None) -> int:
             add_missing_residues=args.add_missing_residues,
             allow_undefined_stereo=args.allow_undefined_stereo,
             max_ligand_residues=args.max_ligand_residues,
+            ligand_charges=args.ligand_charge,
+            strip_existing_hydrogens=args.strip_existing_hydrogens,
+            replace_nonstandard_residues=args.replace_nonstandard_residues,
+            strip_crystallographic_waters=args.strip_crystallographic_waters,
+            strip_residues=strip_residues,
         )
     except (RuntimeError, ValueError) as exc:
         print(f"Error: {exc}", file=sys.stderr)

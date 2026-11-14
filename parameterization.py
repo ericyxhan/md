@@ -214,6 +214,16 @@ def build_parameterizer_command(
         command.append("--add-missing-residues")
     if settings.allow_undefined_stereo:
         command.append("--allow-undefined-stereo")
+    if not settings.strip_existing_hydrogens:
+        command.append("--keep-existing-hydrogens")
+    if not settings.replace_nonstandard_residues:
+        command.append("--keep-nonstandard-residues")
+    if settings.strip_crystallographic_waters:
+        command.append("--strip-waters")
+    for residue_name in settings.strip_residues:
+        command.extend(["--strip-residue", residue_name])
+    for name, charge in settings.ligand_charges:
+        command.extend(["--ligand-charge", f"{name}={charge}"])
 
     return command
 
@@ -248,6 +258,11 @@ def parameterization_fingerprint(
         "add_missing_residues": settings.add_missing_residues,
         "allow_undefined_stereo": settings.allow_undefined_stereo,
         "max_ligand_residues": settings.max_ligand_residues,
+        "ligand_charges": [list(item) for item in settings.ligand_charges],
+        "strip_existing_hydrogens": settings.strip_existing_hydrogens,
+        "replace_nonstandard_residues": settings.replace_nonstandard_residues,
+        "strip_crystallographic_waters": settings.strip_crystallographic_waters,
+        "strip_residues": list(settings.strip_residues),
     }
     digest.update(json.dumps(chemistry, sort_keys=True).encode("utf-8"))
     return digest.hexdigest()
@@ -273,6 +288,11 @@ def _manifest(
             "add_missing_residues": settings.add_missing_residues,
             "allow_undefined_stereo": settings.allow_undefined_stereo,
             "max_ligand_residues": settings.max_ligand_residues,
+            "ligand_charges": [list(item) for item in settings.ligand_charges],
+            "strip_existing_hydrogens": settings.strip_existing_hydrogens,
+            "replace_nonstandard_residues": settings.replace_nonstandard_residues,
+            "strip_crystallographic_waters": settings.strip_crystallographic_waters,
+            "strip_residues": list(settings.strip_residues),
         },
         "outputs": {
             "prepared_pdb": "metadata/prepared.pdb",

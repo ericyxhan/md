@@ -151,11 +151,37 @@ allow_undefined_stereo = false
 max_ligand_residues = 50
 # ccd_cache = "~/.cache/openmm-parameterizer/ccd"
 reuse_existing = true
+strip_existing_hydrogens = true
+replace_nonstandard_residues = true
+strip_crystallographic_waters = false
+strip_residues = []          # e.g. ["SO4", "GOL", "NA"]
+
+# Optional, checked against each prepared ligand's formal charges.
+[parameterization.ligand_charges]
+# L01 = -1
+# L02 = 0
 ```
 
 The parameterizer runs as a subprocess in an environment that has OpenFF,
 RDKit, PDBFixer, and gemmi. The simulation process only reads `prepared.pdb`
 and `system.xml`; it does not import the parameterization stack.
+
+`strip_existing_hydrogens` deletes hydrogens found in protein/complex PDB/mmCIF
+inputs and rebuilds them from the residue templates and `ph`; standalone ligand
+files keep their supplied protonation. `replace_nonstandard_residues`
+maps modified amino acids such as MSE or SEP back to their standard residues
+when they belong to a fairly long, mostly-standard chain; short,
+nonstandard-rich, or explicitly D-amino-acid chains are left intact so
+D-peptide ligands keep their stereochemistry. `ligand_charges` is optional: when an entry is present, the
+run stops if that ligand's formal charges do not match. Ligands can be named by
+residue name (`L01`), index (`1`), report label, or input file name; run once
+and read `metadata/parameterization.txt` to see the assigned names.
+
+`strip_crystallographic_waters` removes input waters before the new solvent box
+is built; when it is false, a warning reports how many were retained.
+`strip_residues` removes named input residues (case-insensitive) such as sulfate,
+glycerol, or unwanted ions before component classification. Neither option
+affects standalone ligand files.
 
 A prepared system is reused only when the input files and chemistry settings
 match its fingerprint. `reuse_existing = false` forces a rebuild on every run.
@@ -452,7 +478,12 @@ The production trajectory is often the largest file; increase
 
 `prepare_system.py` runs in `.param-env` / `/opt/param-env`:
 
-1. Loads the structure and adds missing atoms/hydrogens with PDBFixer. Missing
+1. Loads the structure with PDBFixer. Existing hydrogens are removed and
+   rebuilt from the residue templates and `ph` (unless
+   `strip_existing_hydrogens = false`). Recognised modified residues (MSE, SEP,
+   TPO, ...) are mapped back to standard residues in long, mostly-standard
+   chains; short or nonstandard-rich chains are kept for ligand
+   parameterization (unless `replace_nonstandard_residues = false`). Missing
    loops are not rebuilt unless `add_missing_residues` is enabled; unresolved
    peptide-chain gaps are split into separate chains so PDBFixer adds proper
    terminal atoms instead of creating a false long peptide bond.
@@ -460,10 +491,13 @@ The production trajectory is often the largest file; increase
 3. Classifies a component as a ligand if any residue has no Amber/water
    template. Short mixed components are treated as one ligand; large connected
    components are rejected unless `max_ligand_residues` is raised deliberately.
+   Input waters and named `strip_residues` are removed before this step.
 4. Builds each PDB ligand as an RDKit/OpenFF molecule using CCD intra-residue
    bond orders, topology/geometry inter-residue bonds, formal-charge fixes, and
    3D stereochemistry. Free N-terminal amines in nonstandard peptide residues
    are protonated; SDF/MOL2 protonation states are kept exactly as supplied.
+   Configured `ligand_charges` are checked here and preparation stops on a
+   mismatch.
 5. Merges each ligand component into one topology residue with unique atom
    names, preserving atoms, bonds, positions, charge, and stereochemistry.
 6. Registers `SMIRNOFFTemplateGenerator` with the Amber force field and builds
@@ -567,7 +601,9 @@ issue, not an image issue.
 - Ligand protonation is taken from PDBFixer/CCD for PDB inputs; free
   N-terminal amines in nonstandard peptide residues are protonated
   automatically. For pH-specific or non-RCSB ligands, supply an SDF/MOL2 file
-  with the desired protonation and formal charges.
+  with the desired protonation and formal charges, and optionally add an
+  expected charge under `[parameterization.ligand_charges]` so a mismatch is
+  caught before minimization.
 - A large protein chain with a covalent nonstandard modification is not
   silently merged into one ligand. Provide the ligand separately or raise
   `max_ligand_residues` only after confirming that treating the whole component

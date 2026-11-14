@@ -312,6 +312,159 @@ type = "none"
                 load_config(config_path)
             self.assertIn("unique", str(context.exception))
 
+    def test_parameterization_preparation_defaults(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            config_path = self._write_config(
+                directory,
+                """
+[input]
+complex = "input.pdb"
+
+[production]
+steps = 10
+
+[production.integrator]
+type = "langevin_middle"
+
+[production.barostat]
+type = "none"
+""",
+            )
+
+            parameterization = load_config(config_path).parameterization
+
+            self.assertEqual(parameterization.ligand_charges, ())
+            self.assertTrue(parameterization.strip_existing_hydrogens)
+            self.assertTrue(parameterization.replace_nonstandard_residues)
+            self.assertFalse(parameterization.strip_crystallographic_waters)
+            self.assertEqual(parameterization.strip_residues, ())
+
+    def test_ligand_charges_are_parsed_and_sorted(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            config_path = self._write_config(
+                directory,
+                """
+[input]
+complex = "input.pdb"
+
+[parameterization]
+strip_existing_hydrogens = false
+replace_nonstandard_residues = false
+strip_crystallographic_waters = true
+strip_residues = [" so4 ", "NA", "SO4", "gol"]
+
+[parameterization.ligand_charges]
+L02 = 0
+L01 = -1
+
+[production]
+steps = 10
+
+[production.integrator]
+type = "langevin_middle"
+
+[production.barostat]
+type = "none"
+""",
+            )
+
+            parameterization = load_config(config_path).parameterization
+
+            self.assertEqual(
+                parameterization.ligand_charges,
+                (("L01", -1), ("L02", 0)),
+            )
+            self.assertFalse(parameterization.strip_existing_hydrogens)
+            self.assertFalse(parameterization.replace_nonstandard_residues)
+            self.assertTrue(parameterization.strip_crystallographic_waters)
+            self.assertEqual(
+                parameterization.strip_residues,
+                ("SO4", "NA", "GOL"),
+            )
+
+    def test_non_integer_ligand_charge_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            config_path = self._write_config(
+                directory,
+                """
+[input]
+complex = "input.pdb"
+
+[parameterization.ligand_charges]
+L01 = -0.5
+
+[production]
+steps = 10
+
+[production.integrator]
+type = "langevin_middle"
+
+[production.barostat]
+type = "none"
+""",
+            )
+
+            with self.assertRaises(ConfigError) as context:
+                load_config(config_path)
+            self.assertIn("integer net charge", str(context.exception))
+
+    def test_empty_ligand_name_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            config_path = self._write_config(
+                directory,
+                """
+[input]
+complex = "input.pdb"
+
+[parameterization.ligand_charges]
+" " = 0
+
+[production]
+steps = 10
+
+[production.integrator]
+type = "langevin_middle"
+
+[production.barostat]
+type = "none"
+""",
+            )
+
+            with self.assertRaises(ConfigError) as context:
+                load_config(config_path)
+            self.assertIn("invalid ligand name", str(context.exception))
+
+    def test_strip_residues_must_be_an_array(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            config_path = self._write_config(
+                directory,
+                """
+[input]
+complex = "input.pdb"
+
+[parameterization]
+strip_residues = "SO4"
+
+[production]
+steps = 10
+
+[production.integrator]
+type = "langevin_middle"
+
+[production.barostat]
+type = "none"
+""",
+            )
+
+            with self.assertRaises(ConfigError) as context:
+                load_config(config_path)
+            self.assertIn("strip_residues", str(context.exception))
+
 
 if __name__ == "__main__":
     unittest.main()
