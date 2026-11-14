@@ -183,6 +183,61 @@ class ParameterizationSpec(StrictModel):
     add_missing_residues: bool = False
     allow_undefined_stereo: bool = False
     max_ligand_residues: int = Field(default=50, ge=0, le=100)
+    ligand_charges: dict[str, int] = Field(
+        default_factory=dict,
+        max_length=20,
+        description=(
+            "Optional expected net charge per ligand, keyed by residue name, "
+            "index, report label, or input file name. Preparation fails when a "
+            "prepared ligand's formal charge does not match."
+        ),
+    )
+    strip_existing_hydrogens: bool = Field(
+        default=True,
+        description=(
+            "Delete hydrogens present in protein/complex inputs and rebuild "
+            "them from the residue templates and pH. Standalone ligand files "
+            "keep their supplied protonation."
+        ),
+    )
+    replace_nonstandard_residues: bool = Field(
+        default=True,
+        description=(
+            "Map recognised modified residues in mostly-standard polymer "
+            "chains to their standard counterparts. Short, nonstandard-rich, "
+            "or D-amino-acid chains are kept as ligand material."
+        ),
+    )
+    strip_crystallographic_waters: bool = Field(
+        default=False,
+        description=(
+            "Remove water residues already present in the input before the new "
+            "solvent box is built. Off by default so prepared or pre-solvated "
+            "inputs are not silently changed."
+        ),
+    )
+    strip_residues: list[str] = Field(
+        default_factory=list,
+        max_length=100,
+        description=(
+            "Residue names to remove from the input before component "
+            "classification, for example SO4, GOL, or NA. Case-insensitive."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _validate_preparation_cleanup(self) -> "ParameterizationSpec":
+        for name in self.ligand_charges:
+            if not name.strip():
+                raise ValueError(
+                    "ligand_charges contains an empty ligand name"
+                )
+        for name in self.strip_residues:
+            if not name.strip():
+                raise ValueError(
+                    "strip_residues contains an empty residue name"
+                )
+        return self
 
 
 # ---------------------------------------------------------------------------

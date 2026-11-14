@@ -83,6 +83,61 @@ def test_complex_job_generates_valid_config(settings: Settings, tmp_path: Path) 
     assert config.production.trajectory_report_interval is None
 
 
+def test_preparation_cleanup_round_trip(settings: Settings, tmp_path: Path) -> None:
+    request = JobCreate.model_validate(
+        {
+            "name": "cleanup",
+            "input": {"mode": "complex", "complex_file_id": "file-1"},
+            "parameterization": {
+                "ph": 7.0,
+                "ligand_charges": {"L01": -2},
+                "strip_existing_hydrogens": False,
+                "replace_nonstandard_residues": False,
+                "strip_crystallographic_waters": True,
+                "strip_residues": ["so4", "GOL", "SO4"],
+            },
+            "equilibration": [{"steps": 10}],
+        }
+    )
+    canonical = _canonical(request, settings)
+    parameterization = canonical["parameterization"]
+    assert parameterization["ligand_charges"] == {"L01": -2}
+    assert parameterization["strip_existing_hydrogens"] is False
+    assert parameterization["replace_nonstandard_residues"] is False
+    assert parameterization["strip_crystallographic_waters"] is True
+    assert parameterization["strip_residues"] == ["so4", "GOL", "SO4"]
+
+    job_root = tmp_path / "jobs" / "cleanup"
+    job_root.mkdir(parents=True)
+    config = load_workflow_config(write_config(canonical, job_root, settings))
+    assert config.parameterization.ligand_charges == (("L01", -2),)
+    assert config.parameterization.strip_existing_hydrogens is False
+    assert config.parameterization.replace_nonstandard_residues is False
+    assert config.parameterization.strip_crystallographic_waters is True
+    assert config.parameterization.strip_residues == ("SO4", "GOL")
+
+
+def test_empty_cleanup_names_are_rejected() -> None:
+    with pytest.raises(ValidationError):
+        JobCreate.model_validate(
+            {
+                "name": "bad cleanup",
+                "input": {"mode": "complex", "complex_file_id": "file-1"},
+                "parameterization": {"strip_residues": [" "]},
+                "equilibration": [{"steps": 1}],
+            }
+        )
+    with pytest.raises(ValidationError):
+        JobCreate.model_validate(
+            {
+                "name": "bad cleanup",
+                "input": {"mode": "complex", "complex_file_id": "file-1"},
+                "parameterization": {"ligand_charges": {" ": 0}},
+                "equilibration": [{"steps": 1}],
+            }
+        )
+
+
 def test_protein_ligands_without_production(settings: Settings, tmp_path: Path) -> None:
     request = JobCreate.model_validate(
         {

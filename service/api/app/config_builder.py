@@ -127,6 +127,17 @@ def build_config_document(
             "add_missing_residues": parameterization["add_missing_residues"],
             "allow_undefined_stereo": parameterization["allow_undefined_stereo"],
             "max_ligand_residues": parameterization["max_ligand_residues"],
+            "ligand_charges": dict(parameterization["ligand_charges"]),
+            "strip_existing_hydrogens": parameterization[
+                "strip_existing_hydrogens"
+            ],
+            "replace_nonstandard_residues": parameterization[
+                "replace_nonstandard_residues"
+            ],
+            "strip_crystallographic_waters": parameterization[
+                "strip_crystallographic_waters"
+            ],
+            "strip_residues": list(parameterization["strip_residues"]),
             "ccd_cache": str(
                 Path(settings.data_root).expanduser().resolve() / "cache" / "ccd"
             ),

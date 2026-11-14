@@ -179,6 +179,38 @@ export function StepReview({
                 : "Rejected"
             }
           />
+          <Row
+            label="Input waters"
+            value={
+              draft.parameterization.strip_crystallographic_waters
+                ? "Remove"
+                : "Keep"
+            }
+          />
+          <Row
+            label="Hydrogens"
+            value={
+              draft.parameterization.strip_existing_hydrogens
+                ? "Rebuild"
+                : "Keep input"
+            }
+          />
+          <Row
+            label="Modified residues"
+            value={
+              draft.parameterization.replace_nonstandard_residues
+                ? "Replace"
+                : "Keep as ligand"
+            }
+          />
+          <Row
+            label="Residues removed"
+            value={
+              draft.parameterization.strip_residues.length
+                ? draft.parameterization.strip_residues.join(", ")
+                : "None"
+            }
+          />
         </SummaryCard>
 
         <SummaryCard icon={<Activity className="size-3.5" />} title="Plan">

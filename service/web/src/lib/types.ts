@@ -157,6 +157,11 @@ export interface ParameterizationSpec {
   add_missing_residues: boolean;
   allow_undefined_stereo: boolean;
   max_ligand_residues: number;
+  ligand_charges: Record<string, number>;
+  strip_existing_hydrogens: boolean;
+  replace_nonstandard_residues: boolean;
+  strip_crystallographic_waters: boolean;
+  strip_residues: string[];
 }
 
 export interface InputSpec {

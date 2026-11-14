@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Droplets, FlaskConical, Info, ShieldCheck } from "lucide-react";
 import type { Capabilities } from "../../lib/types";
 import {
@@ -7,6 +8,50 @@ import {
   Toggle,
 } from "../../components/ui/Form";
 import type { Draft } from "./draft";
+
+function parseResidueNames(text: string): string[] {
+  return Array.from(
+    new Set(
+      text
+        .split(/[,\s]+/)
+        .map((name) => name.trim().toUpperCase())
+        .filter(Boolean),
+    ),
+  );
+}
+
+/**
+ * Keep free-form editing local until blur so typing a comma does not rewrite
+ * the input on every keystroke. The draft stores the parsed list.
+ */
+function ResidueNamesInput({
+  value,
+  onChange,
+}: {
+  value: string[];
+  onChange: (names: string[]) => void;
+}) {
+  const [text, setText] = useState(value.join(", "));
+
+  useEffect(() => {
+    setText(value.join(", "));
+  }, [value]);
+
+  return (
+    <TextInput
+      id="strip-residues"
+      value={text}
+      placeholder="SO4, GOL, EDO"
+      onChange={(event) => setText(event.target.value)}
+      onBlur={() => onChange(parseResidueNames(text))}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          event.currentTarget.blur();
+        }
+      }}
+    />
+  );
+}
 
 export function StepSystem({
   draft,
@@ -119,6 +164,19 @@ export function StepSystem({
           label="Allow undefined stereochemistry"
           description="Permit ligands whose stereocenters are not specified. Useful for exploratory work; off by default to avoid physically ambiguous systems."
         />
+        <div className="h-px bg-line" />
+        <Toggle
+          checked={parameterization.strip_crystallographic_waters}
+          onChange={(checked) =>
+            patch({ strip_crystallographic_waters: checked })
+          }
+          label="Remove crystallographic waters"
+          description={
+            parameterization.strip_crystallographic_waters
+              ? "Input waters will be removed before the new solvent box is built."
+              : "Input waters are kept and new solvent is added around them. Enable to remove them before solvation."
+          }
+        />
       </div>
 
       <details className="group rounded-xl border border-line bg-surface">
@@ -148,11 +206,41 @@ export function StepSystem({
               }
             />
           </Field>
-          <div className="flex items-end">
+          <Field
+            label="Residues to remove"
+            hint="Names such as SO4, GOL, or NA; case-insensitive. Leave empty to keep them."
+            htmlFor="strip-residues"
+          >
+            <ResidueNamesInput
+              value={parameterization.strip_residues}
+              onChange={(names) => patch({ strip_residues: names })}
+            />
+          </Field>
+          <div className="space-y-3 sm:col-span-2">
+            <Toggle
+              checked={parameterization.strip_existing_hydrogens}
+              onChange={(checked) =>
+                patch({ strip_existing_hydrogens: checked })
+              }
+              label="Rebuild input hydrogens"
+              description="Remove hydrogens from protein/complex inputs and rebuild them from the residue templates and pH. Turn this off only for a structure with a deliberate custom protonation state."
+            />
+            <div className="h-px bg-line" />
+            <Toggle
+              checked={parameterization.replace_nonstandard_residues}
+              onChange={(checked) =>
+                patch({ replace_nonstandard_residues: checked })
+              }
+              label="Replace modified residues"
+              description="Map MSE, SEP, TPO, and similar modifications back to standard residues in long, mostly-standard chains. D-peptide and nonstandard-rich chains are left intact."
+            />
+          </div>
+          <div className="flex items-end sm:col-span-2">
             <p className="flex items-start gap-1.5 text-[11.5px] leading-relaxed text-muted">
               <Info className="mt-0.5 size-3.5 shrink-0" />
-              Solvent molecules and ions are added automatically. The worker
-              enforces the server&apos;s upload and step limits.
+              New solvent molecules and ions are added automatically. Input
+              waters are kept unless removed above. The worker enforces the
+              server&apos;s upload and step limits.
             </p>
           </div>
         </div>

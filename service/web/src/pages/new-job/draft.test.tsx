@@ -19,6 +19,11 @@ const capabilities: Capabilities = {
       add_missing_residues: true,
       allow_undefined_stereo: false,
       max_ligand_residues: 10,
+      ligand_charges: {},
+      strip_existing_hydrogens: true,
+      replace_nonstandard_residues: true,
+      strip_crystallographic_waters: false,
+      strip_residues: [],
     },
     minimization: { enabled: true },
     equilibration: {},
@@ -73,5 +78,29 @@ describe("buildJobCreate", () => {
 
     const payload = buildJobCreate(draft);
     expect(payload.precision).toBe("mixed");
+  });
+
+  it("carries preparation cleanup settings into the request", () => {
+    const draft = createDraft(capabilities);
+    draft.name = "cleanup job";
+    draft.inputMode = "pdb_id";
+    draft.pdbId = "1AFO";
+    draft.parameterization = {
+      ...draft.parameterization,
+      ligand_charges: { L01: -1 },
+      strip_existing_hydrogens: false,
+      replace_nonstandard_residues: false,
+      strip_crystallographic_waters: true,
+      strip_residues: ["SO4", "GOL"],
+    };
+
+    const payload = buildJobCreate(draft);
+    expect(payload.parameterization).toMatchObject({
+      ligand_charges: { L01: -1 },
+      strip_existing_hydrogens: false,
+      replace_nonstandard_residues: false,
+      strip_crystallographic_waters: true,
+      strip_residues: ["SO4", "GOL"],
+    });
   });
 });
