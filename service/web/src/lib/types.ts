@@ -122,6 +122,12 @@ export interface BarostatSpec {
   random_seed?: number | null;
 }
 
+export interface PositionalRestraintsSpec {
+  enabled: boolean;
+  force_constant_kj_mol_nm2: number;
+  scope: "solute_heavy" | "backbone" | "protein_heavy" | "ligand_heavy";
+}
+
 export interface StageFields {
   label?: string | null;
   steps?: number | null;
@@ -136,6 +142,7 @@ export interface StageFields {
   velocity_seed?: number | null;
   integrator?: IntegratorSpec;
   barostat?: BarostatSpec;
+  positional_restraints?: PositionalRestraintsSpec;
 }
 
 export type StageSpec = StageFields;
@@ -148,6 +155,7 @@ export interface MinimizationSpec {
   enabled: boolean;
   max_iterations?: number;
   tolerance_kj_mol_nm?: number;
+  positional_restraints?: PositionalRestraintsSpec;
 }
 
 export interface ParameterizationSpec {

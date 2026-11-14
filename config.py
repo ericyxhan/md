@@ -339,6 +339,31 @@ class BarostatConfig:
             raise ConfigError(f"{context}.random_seed must be >= 0")
 
 
+@dataclass(frozen=True)
+class PositionalRestraintsConfig:
+    """Hold selected atoms near their starting coordinates during a stage."""
+
+    enabled: bool = True
+    force_constant_kj_mol_nm2: float = 1000.0
+    scope: str = "solute_heavy"
+
+    def validate(self, context: str = "positional_restraints") -> None:
+        if self.force_constant_kj_mol_nm2 <= 0:
+            raise ConfigError(
+                f"{context}.force_constant_kj_mol_nm2 must be > 0"
+            )
+        if self.scope not in {
+            "solute_heavy",
+            "backbone",
+            "protein_heavy",
+            "ligand_heavy",
+        }:
+            raise ConfigError(
+                f"{context}.scope must be one of: solute_heavy, backbone, "
+                "protein_heavy, ligand_heavy"
+            )
+
+
 # ---------------------------------------------------------------------------
 # Simulation stage settings
 # ---------------------------------------------------------------------------
@@ -359,6 +384,9 @@ class StageConfig:
     velocity_seed: int | None = None
     integrator: IntegratorConfig = field(default_factory=IntegratorConfig)
     barostat: BarostatConfig = field(default_factory=BarostatConfig)
+    positional_restraints: PositionalRestraintsConfig = field(
+        default_factory=PositionalRestraintsConfig
+    )
 
     @property
     def trajectory_report_interval(self) -> int | None:
@@ -414,6 +442,9 @@ class StageConfig:
             raise ConfigError(f"{context}.velocity_seed must be >= 0")
         self.integrator.validate(f"{context}.integrator")
         self.barostat.validate(f"{context}.barostat")
+        self.positional_restraints.validate(
+            f"{context}.positional_restraints"
+        )
 
 
 @dataclass(frozen=True)
@@ -423,12 +454,18 @@ class MinimizationConfig:
     enabled: bool = True
     max_iterations: int = 0
     tolerance_kj_mol_nm: float = 10.0
+    positional_restraints: PositionalRestraintsConfig = field(
+        default_factory=PositionalRestraintsConfig
+    )
 
     def validate(self, context: str = "minimization") -> None:
         if self.max_iterations < 0:
             raise ConfigError(f"{context}.max_iterations must be >= 0")
         if self.tolerance_kj_mol_nm <= 0:
             raise ConfigError(f"{context}.tolerance_kj_mol_nm must be > 0")
+        self.positional_restraints.validate(
+            f"{context}.positional_restraints"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -680,11 +717,34 @@ def _resolve_steps(
     return steps
 
 
+
+def _parse_positional_restraints(
+    table: Mapping[str, Any],
+    context: str,
+    default_enabled: bool = True,
+) -> PositionalRestraintsConfig:
+    _check_keys(
+        table,
+        {"enabled", "force_constant_kj_mol_nm2", "scope"},
+        context,
+    )
+    config = PositionalRestraintsConfig(
+        enabled=_boolean(table, "enabled", default_enabled, context),
+        force_constant_kj_mol_nm2=_number(
+            table, "force_constant_kj_mol_nm2", 1000.0, context
+        ),
+        scope=_string(table, "scope", "solute_heavy", context),
+    )
+    config.validate(context)
+    return config
+
+
 def _parse_stage(
     table: Mapping[str, Any],
     *,
     default_name: str,
     context: str,
+    default_restraints_enabled: bool = True,
 ) -> StageConfig:
     _check_keys(
         table,
@@ -702,12 +762,18 @@ def _parse_stage(
             "velocity_seed",
             "integrator",
             "barostat",
+            "positional_restraints",
         },
         context,
     )
 
     integrator = _parse_integrator(table.get("integrator", {}), f"{context}.integrator")
     barostat = _parse_barostat(table.get("barostat", {}), f"{context}.barostat")
+    positional_restraints = _parse_positional_restraints(
+        table.get("positional_restraints", {}),
+        f"{context}.positional_restraints",
+        default_restraints_enabled,
+    )
 
     # A barostat at the same temperature as the thermostat is almost always
     # what the user means, so inherit it unless explicitly supplied.
@@ -731,6 +797,7 @@ def _parse_stage(
         velocity_seed=_optional_integer(table, "velocity_seed", context),
         integrator=integrator,
         barostat=barostat,
+        positional_restraints=positional_restraints,
     )
     stage.validate(context)
     return stage
@@ -887,7 +954,7 @@ def _parse_minimization(table: Mapping[str, Any]) -> MinimizationConfig:
     context = "minimization"
     _check_keys(
         table,
-        {"enabled", "max_iterations", "tolerance_kj_mol_nm"},
+        {"enabled", "max_iterations", "tolerance_kj_mol_nm", "positional_restraints"},
         context,
     )
     config = MinimizationConfig(
@@ -895,6 +962,11 @@ def _parse_minimization(table: Mapping[str, Any]) -> MinimizationConfig:
         max_iterations=_integer(table, "max_iterations", 0, context),
         tolerance_kj_mol_nm=_number(
             table, "tolerance_kj_mol_nm", 10.0, context
+        ),
+        positional_restraints=_parse_positional_restraints(
+            table.get("positional_restraints", {}),
+            f"{context}.positional_restraints",
+            True,
         ),
     )
     config.validate()
@@ -933,7 +1005,12 @@ def _parse_production(value: Any) -> StageConfig | None:
         raise ConfigError("production.enabled must be true or false")
     if not enabled:
         return None
-    return _parse_stage(table, default_name="production", context="production")
+    return _parse_stage(
+        table,
+        default_name="production",
+        context="production",
+        default_restraints_enabled=False,
+    )
 
 
 # ---------------------------------------------------------------------------

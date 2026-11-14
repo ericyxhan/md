@@ -29,10 +29,11 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from sys import stdout
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Sequence
 
 from openmm import (
     BrownianIntegrator,
+    CustomExternalForce,
     LangevinIntegrator,
     LangevinMiddleIntegrator,
     MonteCarloBarostat,
@@ -164,16 +165,57 @@ def add_barostat(system: System, config: BarostatConfig) -> None:
     system.addForce(barostat)
 
 
+def _add_positional_restraints(
+    system: System,
+    restraints: Any,
+    reference_positions: Sequence[float] | None,
+    restrained_indices: Sequence[int],
+) -> None:
+    """Add a harmonic positional restraint force to *system* when enabled."""
+    if restraints is None or not getattr(restraints, "enabled", False):
+        return
+    if not restrained_indices:
+        return
+    if reference_positions is None:
+        raise RuntimeError(
+            "Positional restraints require reference coordinates, but none were "
+            "supplied."
+        )
+
+    force = CustomExternalForce(
+        "k*periodicdistance(x, y, z, xref, yref, zref)^2"
+    )
+    force.addGlobalParameter(
+        "k", float(restraints.force_constant_kj_mol_nm2)
+    )
+    force.addPerParticleParameter("xref")
+    force.addPerParticleParameter("yref")
+    force.addPerParticleParameter("zref")
+    for index in restrained_indices:
+        x, y, z = reference_positions[index]
+        force.addParticle(int(index), [float(x), float(y), float(z)])
+    system.addForce(force)
+
+
 def _create_simulation(
     system: System,
     topology: Topology,
     stage: StageConfig,
     platform: Platform,
     platform_properties: Mapping[str, str],
+    *,
+    reference_positions: Sequence[float] | None = None,
+    restrained_indices: Sequence[int] = (),
 ) -> Simulation:
     """Create a fresh Simulation so retries cannot inherit a broken Context."""
     stage_system = copy.deepcopy(system)
     add_barostat(stage_system, stage.barostat)
+    _add_positional_restraints(
+        stage_system,
+        getattr(stage, "positional_restraints", None),
+        reference_positions,
+        restrained_indices,
+    )
     integrator = create_integrator(stage.integrator)
     return Simulation(
         topology,
@@ -189,6 +231,17 @@ def _create_simulation(
 # ---------------------------------------------------------------------------
 
 
+def minimization_fingerprint(config: MinimizationConfig) -> str:
+    """Hash minimization settings that make its state unsafe to reuse."""
+    payload = {
+        "max_iterations": config.max_iterations,
+        "tolerance_kj_mol_nm": config.tolerance_kj_mol_nm,
+        "positional_restraints": asdict(config.positional_restraints),
+    }
+    serialized = json.dumps(payload, sort_keys=True).encode("utf-8")
+    return hashlib.sha256(serialized).hexdigest()
+
+
 def stage_fingerprint(stage: StageConfig) -> str:
     """Hash only settings that make a checkpoint unsafe to reuse.
 
@@ -199,6 +252,7 @@ def stage_fingerprint(stage: StageConfig) -> str:
     payload = {
         "integrator": asdict(stage.integrator),
         "barostat": asdict(stage.barostat),
+        "positional_restraints": asdict(stage.positional_restraints),
     }
     serialized = json.dumps(payload, sort_keys=True).encode("utf-8")
     return hashlib.sha256(serialized).hexdigest()
@@ -451,6 +505,8 @@ def run_stage(
     resume: bool = True,
     reset_velocities: bool = False,
     on_progress: ProgressCallback | None = None,
+    reference_positions: Sequence[float] | None = None,
+    restrained_indices: Sequence[int] = (),
 ) -> StageResult:
     """Run one stage, resuming and retrying from its checkpoint as needed.
 
@@ -500,6 +556,8 @@ def run_stage(
                 attempt=attempt + 1,
                 reset_velocities=reset_velocities,
                 on_progress=on_progress,
+                reference_positions=reference_positions,
+                restrained_indices=restrained_indices,
             )
         except Exception as exc:  # noqa: BLE001 - retries are the point
             last_error = exc
@@ -537,9 +595,17 @@ def _run_stage_attempt(
     attempt: int,
     reset_velocities: bool,
     on_progress: ProgressCallback | None = None,
+    reference_positions: Sequence[float] | None = None,
+    restrained_indices: Sequence[int] = (),
 ) -> StageResult:
     simulation = _create_simulation(
-        system, topology, stage, platform, platform_properties
+        system,
+        topology,
+        stage,
+        platform,
+        platform_properties,
+        reference_positions=reference_positions,
+        restrained_indices=restrained_indices,
     )
     resumed = False
 
@@ -555,7 +621,13 @@ def _run_stage_attempt(
                 f"moved it to {backup.name} and restarting from the stage input."
             )
             simulation = _create_simulation(
-                system, topology, stage, platform, platform_properties
+                system,
+                topology,
+                stage,
+                platform,
+                platform_properties,
+                reference_positions=reference_positions,
+                restrained_indices=restrained_indices,
             )
             resumed = False
         else:
@@ -742,15 +814,24 @@ def run_minimization(
     platform: Platform,
     platform_properties: Mapping[str, str] | None = None,
     config: MinimizationConfig,
+    reference_positions: Sequence[float] | None = None,
+    restrained_indices: Sequence[int] = (),
 ) -> Path:
     """Minimize the prepared coordinates and write a hand-off state."""
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     state_path = output_dir / "state.xml"
 
+    minimization_system = copy.deepcopy(system)
+    _add_positional_restraints(
+        minimization_system,
+        getattr(config, "positional_restraints", None),
+        reference_positions,
+        restrained_indices,
+    )
     simulation = Simulation(
         topology,
-        copy.deepcopy(system),
+        minimization_system,
         VerletIntegrator(0.001 * picoseconds),
         platform,
         dict(platform_properties or {}),
@@ -803,10 +884,24 @@ def run_minimization(
         f"State: {state_path.name}\n"
     )
     (output_dir / "minimization.log").write_text(report, encoding="utf-8")
+    minimization_fingerprint = hashlib.sha256(
+        json.dumps(
+            {
+                "max_iterations": config.max_iterations,
+                "tolerance_kj_mol_nm": config.tolerance_kj_mol_nm,
+                "positional_restraints": asdict(
+                    getattr(config, "positional_restraints", {})
+                ),
+            },
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
+
     _write_manifest(
         output_dir / "stage.json",
         {
             "name": "minimization",
+            "config_fingerprint": minimization_fingerprint,
             "status": "completed",
             "started_at": started_at,
             "completed_at": _utc_now(),

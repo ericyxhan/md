@@ -115,6 +115,19 @@ class BarostatSpec(StrictModel):
         return self
 
 
+class PositionalRestraintsSpec(StrictModel):
+    enabled: bool = True
+    force_constant_kj_mol_nm2: float = Field(
+        default=1000.0, gt=0.0, le=100000.0
+    )
+    scope: Literal[
+        "solute_heavy",
+        "backbone",
+        "protein_heavy",
+        "ligand_heavy",
+    ] = "solute_heavy"
+
+
 class StageFields(StrictModel):
     label: str | None = Field(default=None, min_length=1, max_length=100)
     steps: int | None = Field(default=None, ge=1, le=50_000_000)
@@ -131,6 +144,9 @@ class StageFields(StrictModel):
     velocity_seed: int | None = Field(default=None, ge=0)
     integrator: IntegratorSpec = Field(default_factory=IntegratorSpec)
     barostat: BarostatSpec = Field(default_factory=BarostatSpec)
+    positional_restraints: PositionalRestraintsSpec = Field(
+        default_factory=PositionalRestraintsSpec
+    )
 
 
 def _validate_stage_duration(model: StageFields) -> None:
@@ -174,6 +190,9 @@ class MinimizationSpec(StrictModel):
     enabled: bool = True
     max_iterations: int = Field(default=0, ge=0, le=100_000)
     tolerance_kj_mol_nm: float = Field(default=10.0, ge=0.1, le=1000.0)
+    positional_restraints: PositionalRestraintsSpec = Field(
+        default_factory=PositionalRestraintsSpec
+    )
 
 
 class ParameterizationSpec(StrictModel):

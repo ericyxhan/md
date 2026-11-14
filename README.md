@@ -195,10 +195,22 @@ all coordinates and velocities, it clears every simulation stage.
 enabled = true
 max_iterations = 0          # 0 = minimize until convergence
 tolerance_kj_mol_nm = 10.0
+
+[minimization.positional_restraints]
+enabled = true
+force_constant_kj_mol_nm2 = 1000
+scope = "solute_heavy"     # solute_heavy, backbone, protein_heavy, ligand_heavy
 ```
 
 Minimization writes `stages/minimization/state.xml`. It is rerun only when it
-is missing or when `--restart` / `--restart-stage minimization` is used.
+is missing, when its settings change, or when `--restart` /
+`--restart-stage minimization` is used.
+
+Each `[[equilibration]]` and `[production]` block may also contain a
+`[...positional_restraints]` table. Restraints are on by default for
+minimization and equilibration, and off by default for production. They hold
+the selected heavy atoms near their prepared coordinates with a harmonic
+`k*periodicdistance(...)^2` force while water and ions relax.
 
 ### Equilibration stages
 

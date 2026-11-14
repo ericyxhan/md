@@ -5,6 +5,7 @@ import type {
   IntegratorType,
   JobCreate,
   MinimizationSpec,
+  PositionalRestraintsSpec,
   ParameterizationSpec,
   Precision,
   StageSpec,
@@ -23,6 +24,9 @@ export interface StageDraft {
   integratorType: IntegratorType;
   timestepPs: number;
   frictionPerPs: number;
+  positionalRestraintsEnabled: boolean;
+  positionalRestraintsK: number;
+  positionalRestraintsScope: PositionalRestraintsSpec["scope"];
 }
 
 export interface Draft {
@@ -64,6 +68,9 @@ export function makeStage(
     integratorType: "langevin_middle",
     timestepPs: 0.002,
     frictionPerPs: 1,
+    positionalRestraintsEnabled: true,
+    positionalRestraintsK: 1000,
+    positionalRestraintsScope: "solute_heavy",
     ...overrides,
   };
 }
@@ -141,6 +148,7 @@ export function applyPreset(
       durationNs: preset.productionNs || 1,
       barostat: true,
       label: "Production",
+      positionalRestraintsEnabled: false,
     }),
     minimization: { ...draft.minimization, enabled: true },
   };
@@ -160,6 +168,12 @@ export function createDraft(capabilities: Capabilities): Draft {
       minimization: {
         ...capabilities.defaults.minimization,
         enabled: true,
+        positional_restraints:
+          capabilities.defaults.minimization.positional_restraints ?? {
+            enabled: true,
+            force_constant_kj_mol_nm2: 1000,
+            scope: "solute_heavy",
+          },
       },
       equilibration: [],
       productionEnabled: true,
@@ -202,6 +216,11 @@ function stagePayload(stage: StageDraft): StageSpec {
           frequency: 25,
         }
       : { type: "none" },
+    positional_restraints: {
+      enabled: stage.positionalRestraintsEnabled,
+      force_constant_kj_mol_nm2: stage.positionalRestraintsK,
+      scope: stage.positionalRestraintsScope,
+    },
   };
 }
 

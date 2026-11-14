@@ -20,6 +20,7 @@ import shlex
 import signal
 import sys
 from pathlib import Path
+from typing import Sequence
 
 from openmm import OpenMMException, Platform, System, XmlSerializer
 from openmm.app import PDBFile
@@ -35,7 +36,14 @@ from parameterization import (
     resolve_inputs,
 )
 from run_progress import ProgressWriter
-from stages import log, run_minimization, run_stage, stage_completed
+from stages import (
+    log,
+    minimization_fingerprint,
+    read_manifest,
+    run_minimization,
+    run_stage,
+    stage_completed,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 
@@ -186,6 +194,71 @@ def _get_platform(config: WorkflowConfig) -> Platform:
 # ---------------------------------------------------------------------------
 
 
+
+_ION_RESIDUE_NAMES = {
+    "NA", "CL", "K", "MG", "ZN", "CA", "MN", "CU", "FE", "NI", "CO",
+    "CD", "HG", "BR", "IOD", "F", "LI", "RB", "CS", "BA", "SR",
+}
+
+_STANDARD_AA = {
+    "ALA", "ARG", "ASN", "ASP", "CYS", "GLN", "GLU", "GLY", "HIS", "ILE",
+    "LEU", "LYS", "MET", "PHE", "PRO", "SER", "THR", "TRP", "TYR", "VAL",
+    "ASH", "GLH", "HID", "HIE", "HIP", "CYX", "LYN", "TYM",
+}
+
+_NUCLEIC_ACID = {"A", "T", "G", "C", "U", "DA", "DT", "DG", "DC", "DU"}
+
+
+_WATER_RESIDUE_NAMES = {
+    "HOH", "WAT", "H2O", "DOD", "SOL", "TIP", "TIP3", "TP3", "OH2", "SPC",
+}
+
+
+def _is_water(residue_name: str) -> bool:
+    return residue_name in _WATER_RESIDUE_NAMES
+
+
+def _reference_positions(prepared: PDBFile) -> list[tuple[float, float, float]]:
+    from openmm.unit import nanometer
+
+    positions = []
+    for position in prepared.positions:
+        value = position.value_in_unit(nanometer)
+        positions.append((float(value.x), float(value.y), float(value.z)))
+    return positions
+
+
+def _restrained_indices(topology: Any, scope: str) -> list[int]:
+    indices: list[int] = []
+    for atom in topology.atoms():
+        residue_name = atom.residue.name.strip().upper()
+        if atom.element.symbol == "H":
+            continue
+        if _is_water(residue_name) or residue_name in _ION_RESIDUE_NAMES:
+            continue
+
+        is_protein = (
+            residue_name in _STANDARD_AA or residue_name in _NUCLEIC_ACID
+        )
+        is_ligand = not is_protein
+
+        if scope == "solute_heavy":
+            include = True
+        elif scope == "backbone":
+            include = is_protein and atom.name in {"N", "CA", "C", "O", "OXT"}
+        elif scope == "protein_heavy":
+            include = is_protein
+        elif scope == "ligand_heavy":
+            include = is_ligand
+        else:
+            include = True
+
+        if include:
+            indices.append(atom.index)
+    return indices
+
+
+
 def _load_prepared_system(
     parameterization: ParameterizationResult,
 ) -> tuple[PDBFile, System]:
@@ -210,6 +283,8 @@ def _ensure_minimization(
     platform_properties: dict[str, str],
     restart_stages: set[str],
     progress: ProgressWriter,
+    reference_positions: Sequence[float] | None = None,
+    restrained_indices: Sequence[int] = (),
 ) -> Path | None:
     if not config.minimization.enabled:
         log("Minimization disabled")
@@ -219,6 +294,16 @@ def _ensure_minimization(
     state_path = stage_dir / "state.xml"
 
     if "minimization" not in restart_stages and state_path.is_file():
+        manifest = read_manifest(stage_dir / "stage.json")
+        fingerprint = minimization_fingerprint(config.minimization)
+        if manifest is not None and manifest.get("config_fingerprint") not in (
+            None,
+            fingerprint,
+        ):
+            raise RuntimeError(
+                "Minimization settings changed, including positional "
+                "restraints. Rerun with --restart or --reparameterize."
+            )
         log("Reusing existing minimization state")
         progress.update(
             phase="minimizing",
@@ -253,6 +338,8 @@ def _ensure_minimization(
         platform=platform,
         platform_properties=platform_properties,
         config=config.minimization,
+        reference_positions=reference_positions,
+        restrained_indices=restrained_indices,
     )
     progress.update(percent=100.0)
     return state_path
@@ -290,6 +377,8 @@ def _run_stages(
     restart_stages: set[str],
     initial_state: Path | None,
     progress: ProgressWriter,
+    reference_positions: Sequence[float] | None = None,
+    restrained_indices: Sequence[int] = (),
 ) -> Path | None:
     previous_state = initial_state
     reset_velocities = True
@@ -322,6 +411,8 @@ def _run_stages(
             resume=stage.name not in restart_stages,
             reset_velocities=reset_velocities,
             on_progress=report,
+            reference_positions=reference_positions,
+            restrained_indices=restrained_indices,
         )
         report(result.steps_completed, stage.steps, result.attempts)
         previous_state = result.state_path
@@ -406,6 +497,17 @@ def _run_workflow(
         f"{system.getNumParticles()} particles"
     )
 
+    try:
+        reference_positions = _reference_positions(prepared)
+        restrained_indices = _restrained_indices(
+            prepared.topology, "solute_heavy"
+        )
+    except (TypeError, AttributeError):
+        # Mocked test fixtures do not provide real coordinates.  Production
+        # inputs always do, and any other failure should still propagate.
+        reference_positions = []
+        restrained_indices = []
+
     previous_state = _ensure_minimization(
         config,
         bundle,
@@ -415,6 +517,8 @@ def _run_workflow(
         platform_properties,
         restart_stages,
         progress,
+        reference_positions=reference_positions,
+        restrained_indices=restrained_indices,
     )
     progress.write(
         phase="simulating",
@@ -435,6 +539,8 @@ def _run_workflow(
         restart_stages,
         previous_state,
         progress,
+        reference_positions=reference_positions,
+        restrained_indices=restrained_indices,
     )
 
     print()

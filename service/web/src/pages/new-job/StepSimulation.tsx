@@ -7,7 +7,7 @@ import {
   Sparkles,
   Trash2,
 } from "lucide-react";
-import type { Capabilities, IntegratorType } from "../../lib/types";
+import type { Capabilities, IntegratorType, PositionalRestraintsSpec } from "../../lib/types";
 import {
   cn,
   formatCompact,
@@ -174,6 +174,51 @@ function StageEditor({
           description="Maintain atmospheric pressure with a Monte Carlo barostat."
         />
 
+        <Toggle
+          checked={stage.positionalRestraintsEnabled}
+          onChange={(checked) =>
+            onChange({ positionalRestraintsEnabled: checked })
+          }
+          label="Hold starting pose"
+          description="Harmonically restrain solute heavy atoms during this stage. Recommended for equilibration; normally off for production."
+        />
+
+        {stage.positionalRestraintsEnabled ? (
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Restraint strength">
+              <SuffixInput
+                type="number"
+                min={1}
+                max={100000}
+                step={100}
+                suffix="kJ/mol·nm²"
+                value={stage.positionalRestraintsK}
+                onChange={(event) =>
+                  onChange({
+                    positionalRestraintsK: Number(event.target.value),
+                  })
+                }
+              />
+            </Field>
+            <Field label="Restrained atoms">
+              <Select
+                value={stage.positionalRestraintsScope}
+                onChange={(event) =>
+                  onChange({
+                    positionalRestraintsScope: event.target
+                      .value as PositionalRestraintsSpec["scope"],
+                  })
+                }
+              >
+                <option value="solute_heavy">All solute heavy atoms</option>
+                <option value="backbone">Protein backbone</option>
+                <option value="protein_heavy">Protein heavy atoms</option>
+                <option value="ligand_heavy">Ligand heavy atoms</option>
+              </Select>
+            </Field>
+          </div>
+        ) : null}
+
         {stage.barostat ? (
           <Field label="Target pressure">
             <SuffixInput
@@ -320,46 +365,132 @@ export function StepSimulation({
           description="Relax clashes before dynamics. Recommended unless the system was already minimized."
         />
         {draft.minimization.enabled ? (
-          <div className="mt-3 grid gap-3 border-t border-line pt-3 sm:grid-cols-2">
-            <Field
-              label="Maximum iterations"
-              hint="0 lets OpenMM choose a safe limit."
-            >
-              <SuffixInput
-                type="number"
-                min={0}
-                max={100000}
-                value={draft.minimization.max_iterations ?? 0}
-                onChange={(event) =>
-                  onChange({
-                    ...draft,
-                    minimization: {
-                      ...draft.minimization,
-                      max_iterations: Number(event.target.value),
+          <div className="mt-3 space-y-3 border-t border-line pt-3">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field
+                label="Maximum iterations"
+                hint="0 lets OpenMM choose a safe limit."
+              >
+                <SuffixInput
+                  type="number"
+                  min={0}
+                  max={100000}
+                  value={draft.minimization.max_iterations ?? 0}
+                  onChange={(event) =>
+                    onChange({
+                      ...draft,
+                      minimization: {
+                        ...draft.minimization,
+                        max_iterations: Number(event.target.value),
+                      },
+                    })
+                  }
+                />
+              </Field>
+              <Field label="Tolerance">
+                <SuffixInput
+                  type="number"
+                  min={0.1}
+                  max={1000}
+                  step={0.1}
+                  suffix="kJ/mol·nm"
+                  value={draft.minimization.tolerance_kj_mol_nm ?? 10}
+                  onChange={(event) =>
+                    onChange({
+                      ...draft,
+                      minimization: {
+                        ...draft.minimization,
+                        tolerance_kj_mol_nm: Number(event.target.value),
+                      },
+                    })
+                  }
+                />
+              </Field>
+            </div>
+            <Toggle
+              checked={
+                draft.minimization.positional_restraints?.enabled ?? true
+              }
+              onChange={(enabled) =>
+                onChange({
+                  ...draft,
+                  minimization: {
+                    ...draft.minimization,
+                    positional_restraints: {
+                      ...(draft.minimization.positional_restraints ?? {
+                        force_constant_kj_mol_nm2: 1000,
+                        scope: "solute_heavy",
+                      }),
+                      enabled,
                     },
-                  })
-                }
-              />
-            </Field>
-            <Field label="Tolerance">
-              <SuffixInput
-                type="number"
-                min={0.1}
-                max={1000}
-                step={0.1}
-                suffix="kJ/mol·nm"
-                value={draft.minimization.tolerance_kj_mol_nm ?? 10}
-                onChange={(event) =>
-                  onChange({
-                    ...draft,
-                    minimization: {
-                      ...draft.minimization,
-                      tolerance_kj_mol_nm: Number(event.target.value),
-                    },
-                  })
-                }
-              />
-            </Field>
+                  },
+                })
+              }
+              label="Hold starting pose"
+              description="Harmonically restrain solute heavy atoms during minimization so water and ions relax around the complex."
+            />
+            {draft.minimization.positional_restraints?.enabled ?? true ? (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Restraint strength">
+                  <SuffixInput
+                    type="number"
+                    min={1}
+                    max={100000}
+                    step={100}
+                    suffix="kJ/mol·nm²"
+                    value={
+                      draft.minimization.positional_restraints
+                        ?.force_constant_kj_mol_nm2 ?? 1000
+                    }
+                    onChange={(event) =>
+                      onChange({
+                        ...draft,
+                        minimization: {
+                          ...draft.minimization,
+                          positional_restraints: {
+                            ...(draft.minimization.positional_restraints ?? {
+                              enabled: true,
+                              scope: "solute_heavy",
+                            }),
+                            force_constant_kj_mol_nm2: Number(
+                              event.target.value,
+                            ),
+                          },
+                        },
+                      })
+                    }
+                  />
+                </Field>
+                <Field label="Restrained atoms">
+                  <Select
+                    value={
+                      draft.minimization.positional_restraints?.scope ??
+                      "solute_heavy"
+                    }
+                    onChange={(event) =>
+                      onChange({
+                        ...draft,
+                        minimization: {
+                          ...draft.minimization,
+                          positional_restraints: {
+                            ...(draft.minimization.positional_restraints ?? {
+                              enabled: true,
+                              force_constant_kj_mol_nm2: 1000,
+                            }),
+                            scope: event.target.value as PositionalRestraintsSpec["scope"],
+                          },
+                        },
+                      })
+                    }
+                  >
+                    <option value="solute_heavy">All solute heavy atoms</option>
+                    <option value="backbone">Protein backbone</option>
+                    <option value="protein_heavy">Protein heavy atoms</option>
+                    <option value="ligand_heavy">Ligand heavy atoms</option>
+                  </Select>
+                </Field>
+              </div>
+            ) : null}
           </div>
         ) : null}
       </div>

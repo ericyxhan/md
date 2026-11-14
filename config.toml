@@ -99,6 +99,13 @@ enabled = true
 max_iterations = 0          # 0 = minimize until convergence
 tolerance_kj_mol_nm = 10.0
 
+# Hold solute heavy atoms near their prepared coordinates while water and ions
+# relax.  The same settings can be given per equilibration or production stage.
+[minimization.positional_restraints]
+enabled = true
+force_constant_kj_mol_nm2 = 1000
+scope = "solute_heavy"
+
 # ---------------------------------------------------------------------------
 # Equilibration stages
 # ---------------------------------------------------------------------------

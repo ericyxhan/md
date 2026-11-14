@@ -74,6 +74,15 @@ def _barostat_table(barostat: dict[str, Any]) -> dict[str, Any]:
     return table
 
 
+
+
+def _positional_restraints_table(spec: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "enabled": spec["enabled"],
+        "force_constant_kj_mol_nm2": spec["force_constant_kj_mol_nm2"],
+        "scope": spec["scope"],
+    }
+
 def _stage_table(stage: dict[str, Any]) -> dict[str, Any]:
     table: dict[str, Any] = {
         "name": stage["name"],
@@ -93,6 +102,10 @@ def _stage_table(stage: dict[str, Any]) -> dict[str, Any]:
         ]
     if stage.get("velocity_seed") is not None:
         table["velocity_seed"] = stage["velocity_seed"]
+    if stage.get("positional_restraints") is not None:
+        table["positional_restraints"] = _positional_restraints_table(
+            stage["positional_restraints"]
+        )
     return table
 
 
@@ -147,6 +160,9 @@ def build_config_document(
             "enabled": minimization["enabled"],
             "max_iterations": minimization["max_iterations"],
             "tolerance_kj_mol_nm": minimization["tolerance_kj_mol_nm"],
+            "positional_restraints": _positional_restraints_table(
+                minimization["positional_restraints"]
+            ),
         },
     }
 
