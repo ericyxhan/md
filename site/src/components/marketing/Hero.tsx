@@ -79,8 +79,12 @@ export default function Hero() {
                     ['Equilibration 01', 'done'],
                     ['Equilibration 02', 'done'],
                     ['Production', 'running'],
-                  ].map(([name, state]) => (
-                    <li key={name} className="flex items-center justify-between">
+                  ].map(([name, state], i) => (
+                    <li
+                      key={name}
+                      className="flex items-center justify-between opacity-0 animate-fade-up"
+                      style={{ animationDelay: `${i * 180 + 300}ms`, animationFillMode: 'forwards' }}
+                    >
                       <span className="text-ink-soft">{name}</span>
                       <span
                         className={`text-xs font-medium ${
@@ -101,7 +105,7 @@ export default function Hero() {
                     <span className="font-mono text-xs text-muted">42,800 / 100,000 steps</span>
                   </div>
                   <div className="mt-2 h-2 overflow-hidden rounded-full bg-surface-muted">
-                    <div className="h-full w-[43%] rounded-full bg-brand-500 transition-all" />
+                    <div className="h-full w-[43%] rounded-full bg-brand-500 animate-grow-bar" />
                   </div>
                 </div>
                 <div className="mt-5 grid grid-cols-3 gap-3">
