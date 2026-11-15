@@ -31,7 +31,8 @@ jobs:
       - run: npm ci
       - run: npm run build
         env:
-          VITE_APP_URL: ${{ vars.APP_URL || 'https://app.lattice.md' }}
+          VITE_APP_URL: ${{ vars.APP_URL || 'https://server.tailfe0663.ts.net' }}
+          VITE_BASE: ${{ vars.BASE_PATH || '/md/' }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site/dist
