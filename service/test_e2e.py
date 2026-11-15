@@ -3,9 +3,9 @@ import http.client
 import json
 import urllib.error
 
-TOKEN = "dw_EWdPlif6iJZu70abMVa9i8ZoI1jy9Z3_4f05jORX_n1T1jJHV40vmsA3dLcPT"
+TOKEN = "_MU3XNL_BXZ9wHtUtiXumXbJVjKXcA4wM_n1viAtLUpwRLdXxm0o7rEt80BiWKDj"
 BASE_HOST = "127.0.0.1"
-BASE_PORT = 8000
+BASE_PORT = 8080
 
 
 def api_request(method, path, body=None, content_type="application/json", files=None):
@@ -54,7 +54,7 @@ def upload_file(filepath, filename, content_type):
 
 # Step 1: Upload protein
 print("=== Step 1: Upload protein.pdb ===")
-status, result = upload_file("/data/protein.pdb", "protein.pdb", "chemical/x-pdb")
+status, result = upload_file("/home/erichan/md/service/.runtime/data/protein.pdb", "protein.pdb", "chemical/x-pdb")
 print(f"Status: {status}")
 if status != 201:
     print(f"FAILED: {result}")
@@ -64,7 +64,7 @@ print(f"Protein file ID: {protein_file_id}")
 
 # Step 2: Upload ligand
 print("\n=== Step 2: Upload ligand_CLR_401.sdf ===")
-status, result = upload_file("/data/ligand_CLR_401.sdf", "ligand.sdf", "chemical/x-mdl-sdfile")
+status, result = upload_file("/home/erichan/md/service/.runtime/data/ligand.sdf", "ligand.sdf", "chemical/x-mdl-sdfile")
 print(f"Status: {status}")
 if status != 201:
     print(f"FAILED: {result}")

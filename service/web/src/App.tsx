@@ -45,6 +45,9 @@ const WorkflowDetailPage = lazyWithReload(() =>
     default: m.WorkflowDetailPage,
   })),
 );
+const DockingPage = lazyWithReload(
+  () => import("./pages/prep/DockingPage"),
+);
 const MembraneEmbedPage = lazyWithReload(
   () => import("./pages/prep/MembraneEmbedPage"),
 );
@@ -159,6 +162,8 @@ export default function App() {
           <Route path="/new" element={<NewJobPage />} />
           <Route path="/prep/membrane" element={<MembraneEmbedPage />} />
           <Route path="/prep/membrane/:prepJobId" element={<MembraneEmbedPage />} />
+          <Route path="/prep/docking" element={<DockingPage />} />
+          <Route path="/prep/docking/:prepJobId" element={<DockingPage />} />
           <Route path="/prep/system-prep" element={<SystemPrepPage />} />
           <Route path="/prep/system-prep/:prepJobId" element={<SystemPrepPage />} />
           <Route path="/workflows" element={<WorkflowsPage />} />

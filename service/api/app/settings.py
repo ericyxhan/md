@@ -89,6 +89,7 @@ class Settings(BaseSettings):
     # Path to the Packmol-Memgen executable used by membrane embedding.  If
     # unset, prep endpoints return 503.
     packmol_path: str = ""
+    docking_enabled: bool = True
 
     # Prep worker poll and lease settings (mirrors the simulation worker).
     prep_poll_seconds: float = Field(default=2.0, gt=0, le=60)

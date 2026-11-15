@@ -280,6 +280,16 @@ class ClaimedPrepJob:
     steps: list[dict[str, Any]] | None = None
     source_path: Path | None = None
     work_dir: Path | None = None
+    # Docking fields (set for type == "docking")
+    receptor_file_id: str | None = None
+    ligand_file_ids: list[str] | None = None
+    ligand_smiles: list[str] | None = None
+    ligand_paths: dict[str, str] | None = None
+    box_center: list[float] | None = None
+    box_size: list[float] | None = None
+    exhaustiveness: int = 8
+    num_poses: int = 9
+    seed: int | None = None
 
     @property
     def output_pdb(self) -> Path:
@@ -290,6 +300,11 @@ class ClaimedPrepJob:
     def system_output_pdb(self) -> Path:
         assert self.work_dir is not None
         return self.work_dir / "system_prep.pdb"
+
+    @property
+    def docking_output_pdb(self) -> Path:
+        assert self.work_dir is not None
+        return self.work_dir / "docked_complex.pdb"
 
 
 class PrepWorker:
@@ -400,6 +415,10 @@ class PrepWorker:
 
         if claim.job_type == "system_prep":
             self._execute_system_prep(claim)
+            return
+
+        if claim.job_type == "docking":
+            self._execute_docking(claim)
             return
 
         # membrane_embed (default)
@@ -703,6 +722,298 @@ class PrepWorker:
             if attempt < FINISH_ATTEMPTS:
                 self._sleep(float(attempt))
 
+    def _execute_docking(self, claim: ClaimedPrepJob) -> None:
+        """Run docking in-process (Vina + Meeko + RDKit)."""
+
+        assert claim.source_path is not None
+        assert claim.work_dir is not None
+        work_dir = claim.work_dir
+        work_dir.mkdir(parents=True, exist_ok=True)
+        logs_dir = work_dir / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+
+        self._job_log(claim, f"claimed docking job {claim.prep_job_id}")
+
+        receptor_pdb = work_dir / "input_receptor.pdb"
+        try:
+            shutil.copy2(claim.source_path, receptor_pdb)
+        except OSError as exc:
+            self._finish_failure(claim, None, "prep_failed", f"Could not copy receptor: {exc}")
+            return
+
+        # Resolve ligands: copy files / convert SMILES to SDF.
+        ligand_inputs: list[Path] = []
+        ligand_names: list[str] = []
+        try:
+            import rdkit
+            from rdkit import Chem
+            from rdkit.Chem import AllChem
+        except Exception as exc:
+            self._finish_failure(claim, None, "prep_not_configured", f"RDKit not available: {exc}")
+            return
+
+        # file ligands
+        ligand_paths = claim.ligand_paths or {}
+        for lid in (claim.ligand_file_ids or []):
+            src = ligand_paths.get(lid)
+            if not src:
+                self._finish_failure(claim, None, "prep_failed", f"Missing path for ligand {lid}")
+                return
+            src_path = Path(src)
+            dst = work_dir / f"ligand_{len(ligand_inputs)}.sdf"
+            try:
+                shutil.copy2(src_path, dst)
+            except OSError as exc:
+                self._finish_failure(claim, None, "prep_failed", f"Could not copy ligand: {exc}")
+                return
+            ligand_inputs.append(dst)
+            ligand_names.append(src_path.name)
+
+        # smiles ligands
+        for i, smi in enumerate(claim.ligand_smiles or []):
+            sdf_path = work_dir / f"ligand_{len(ligand_inputs)}.sdf"
+            try:
+                mol = Chem.MolFromSmiles(smi)
+                if mol is None:
+                    raise ValueError(f"invalid SMILES: {smi}")
+                mol = Chem.AddHs(mol)
+                AllChem.EmbedMolecule(mol, AllChem.ETKDGv3())
+                AllChem.MMFFOptimizeMolecule(mol)
+                w = Chem.SDWriter(str(sdf_path))
+                w.write(mol)
+                w.close()
+            except Exception as exc:
+                self._finish_failure(claim, None, "prep_failed", f"SMILES conversion failed: {exc}")
+                return
+            ligand_inputs.append(sdf_path)
+            ligand_names.append(f"smiles_{i}")
+
+        if not ligand_inputs:
+            self._finish_failure(claim, None, "prep_failed", "No ligands provided")
+            return
+
+        # Progress reporting helper
+        def report(percent: float, message: str) -> None:
+            try:
+                self.client.progress(
+                    claim.prep_job_id,
+                    {
+                        "run_token": claim.run_token,
+                        "phase": "docking",
+                        "percent": percent,
+                        "message": message,
+                    },
+                )
+            except Exception:
+                pass
+
+        # Find meeko scripts
+        try:
+            import meeko
+            meeko_dir = Path(meeko.__file__).resolve().parent
+            mk_receptor = meeko_dir / "cli" / "mk_prepare_receptor.py"
+            mk_ligand = meeko_dir / "cli" / "mk_prepare_ligand.py"
+        except Exception as exc:
+            self._finish_failure(claim, None, "prep_not_configured", f"Meeko not available: {exc}")
+            return
+
+        python = sys.executable
+        receptor_pdbqt = work_dir / "receptor.pdbqt"
+        box_file = work_dir / "receptor.box.txt"
+
+        # Auto box if not provided
+        box_center = claim.box_center
+        box_size = claim.box_size
+        if box_center is None or box_size is None:
+            # use first ligand as enveloping
+            enveloping = ligand_inputs[0]
+            cmd = [
+                python, str(mk_receptor),
+                "--read_pdb", str(receptor_pdb),
+                "--box_enveloping", str(enveloping),
+                "--padding", "10",
+                "-o", str(work_dir / "receptor"),
+                "-p", "-v",
+            ]
+            report(0.05, "preparing receptor (auto box)")
+            try:
+                subprocess.run(cmd, check=True, capture_output=True, text=True, cwd=str(work_dir))
+            except subprocess.CalledProcessError as exc:
+                self._finish_failure(claim, None, "prep_failed", f"receptor prep failed: {exc.stderr[:500]}")
+                return
+            # parse box file
+            try:
+                for line in box_file.read_text().splitlines():
+                    k, _, v = line.partition("=")
+                    k = k.strip(); v = v.strip()
+                    if k == "center_x": cx = float(v)
+                    elif k == "center_y": cy = float(v)
+                    elif k == "center_z": cz = float(v)
+                    elif k == "size_x": sx = float(v)
+                    elif k == "size_y": sy = float(v)
+                    elif k == "size_z": sz = float(v)
+                box_center = [cx, cy, cz]
+                box_size = [sx, sy, sz]
+            except Exception as exc:
+                self._finish_failure(claim, None, "prep_failed", f"could not parse box: {exc}")
+                return
+        else:
+            cmd = [
+                python, str(mk_receptor),
+                "--read_pdb", str(receptor_pdb),
+                "--box_center", str(box_center[0]), str(box_center[1]), str(box_center[2]),
+                "--box_size", str(box_size[0]), str(box_size[1]), str(box_size[2]),
+                "-o", str(work_dir / "receptor"),
+                "-p", "-v",
+            ]
+            report(0.05, "preparing receptor")
+            try:
+                subprocess.run(cmd, check=True, capture_output=True, text=True, cwd=str(work_dir))
+            except subprocess.CalledProcessError as exc:
+                self._finish_failure(claim, None, "prep_failed", f"receptor prep failed: {exc.stderr[:500]}")
+                return
+
+        if not receptor_pdbqt.is_file():
+            self._finish_failure(claim, None, "prep_failed", "receptor PDBQT not produced")
+            return
+
+        # Vina import
+        try:
+            from vina import Vina
+        except Exception as exc:
+            self._finish_failure(claim, None, "prep_not_configured", f"Vina not available: {exc}")
+            return
+
+        exhaustiveness = claim.exhaustiveness or 8
+        num_poses = claim.num_poses or 9
+        seed = claim.seed
+
+        all_poses_pdbqt = work_dir / "poses.pdbqt"
+        scores_csv = work_dir / "scores.csv"
+        scores_lines = ["ligand,pose,affinity_kcal_mol"]
+
+        top_complex_pdb = None
+
+        total_ligands = len(ligand_inputs)
+        for li, lig_path in enumerate(ligand_inputs):
+            base = f"ligand_{li}"
+            lig_pdbqt = work_dir / f"{base}.pdbqt"
+            # prepare ligand
+            report(0.1 + 0.8 * (li / max(total_ligands, 1)), f"preparing ligand {li+1}/{total_ligands}")
+            try:
+                subprocess.run(
+                    [python, str(mk_ligand), "-i", str(lig_path), "-o", str(lig_pdbqt)],
+                    check=True, capture_output=True, text=True, cwd=str(work_dir),
+                )
+            except subprocess.CalledProcessError as exc:
+                self._finish_failure(claim, None, "prep_failed", f"ligand prep failed: {exc.stderr[:500]}")
+                return
+            if not lig_pdbqt.is_file():
+                self._finish_failure(claim, None, "prep_failed", f"ligand PDBQT not produced for {lig_path.name}")
+                return
+
+            report(0.1 + 0.8 * ((li + 0.5) / max(total_ligands, 1)), f"docking ligand {li+1}/{total_ligands}")
+            out_poses = work_dir / f"poses_{li}.pdbqt"
+            try:
+                v = Vina(sf_name="vina")
+                v.set_receptor(str(receptor_pdbqt))
+                v.set_ligand_from_file(str(lig_pdbqt))
+                v.compute_vina_maps(center=box_center, box_size=box_size)
+                v.dock(exhaustiveness=exhaustiveness, n_poses=num_poses, seed=seed if seed is not None else None)
+                v.write_poses(str(out_poses), n_poses=num_poses, overwrite=True)
+                energies = v.energies()
+            except Exception as exc:
+                self._finish_failure(claim, None, "prep_failed", f"vina docking failed: {exc}")
+                return
+
+            # append poses
+            try:
+                with all_poses_pdbqt.open("a") as f:
+                    f.write(out_poses.read_text())
+                    f.write("
+")
+            except OSError:
+                pass
+
+            for pi, e in enumerate(energies):
+                affinity = e[0] if isinstance(e, (list, tuple)) else e
+                scores_lines.append(f"{ligand_names[li]},{pi+1},{affinity}")
+
+            # top pose complex: combine receptor PDB + ligand pose ATOM lines
+            if top_complex_pdb is None:
+                try:
+                    pose_text = out_poses.read_text()
+                    lig_lines = [ln for ln in pose_text.splitlines() if ln.startswith(("ATOM", "HETATM"))]
+                    # only first pose: stop at first ENDMDL/MODEL? Vina writes MODEL/ENDMDL
+                    # extract first model
+                    first_model_lines = []
+                    in_model = False
+                    seen_model = False
+                    for ln in pose_text.splitlines():
+                        if ln.startswith("MODEL"):
+                            in_model = True
+                            seen_model = True
+                            continue
+                        if ln.startswith("ENDMDL"):
+                            break
+                        if (not seen_model) or in_model:
+                            if ln.startswith(("ATOM", "HETATM")):
+                                first_model_lines.append(ln)
+                    if not first_model_lines:
+                        first_model_lines = lig_lines
+                    # renumber ligand atoms chain B
+                    combined = receptor_pdb.read_text().rstrip() + "
+"
+                    for ln in first_model_lines:
+                        # change chain id to B if needed; keep as is
+                        combined += ln + "
+"
+                    combined += "END
+"
+                    top_complex_pdb = work_dir / "docked_complex.pdb"
+                    top_complex_pdb.write_text(combined)
+                except Exception as exc:
+                    self._job_log(claim, f"could not write complex pdb: {exc}")
+
+            report(0.1 + 0.8 * ((li + 1) / max(total_ligands, 1)), f"finished ligand {li+1}/{total_ligands}")
+
+        # write scores
+        try:
+            scores_csv.write_text("
+".join(scores_lines) + "
+")
+        except OSError:
+            pass
+
+        output_paths = []
+        if top_complex_pdb is not None and top_complex_pdb.is_file():
+            output_paths.append(top_complex_pdb)
+        if all_poses_pdbqt.is_file():
+            output_paths.append(all_poses_pdbqt)
+        if scores_csv.is_file():
+            output_paths.append(scores_csv)
+
+        if not output_paths:
+            self._finish_failure(claim, None, "prep_failed", "docking produced no outputs")
+            return
+
+        # finish
+        payload = {
+            "run_token": claim.run_token,
+            "status": "completed",
+            "output_file_ids": [str(p) for p in output_paths],
+        }
+        self._job_log(claim, "reporting completed")
+        for attempt in range(1, 4):
+            try:
+                self.client.finish(claim.prep_job_id, payload)
+            except Exception as exc:
+                self._job_log(claim, f"finish failed: {exc}")
+            else:
+                self._job_log(claim, "finish accepted")
+                return
+            time.sleep(float(attempt))
+
     def _poll_progress(
         self, claim: ClaimedPrepJob, now: float
     ) -> str | None:
@@ -945,6 +1256,44 @@ class PrepWorker:
                 run_token=run_token,
                 job_type=job_type,
                 steps=steps,
+                source_path=source_path,
+                work_dir=work_dir,
+            )
+
+        if job_type == "docking":
+            if source_path is None:
+                raise ClaimError("claim missing source_path")
+            if work_dir is None:
+                raise ClaimError("claim missing work_dir")
+            ligand_file_ids = data.get("ligand_file_ids") or []
+            if not isinstance(ligand_file_ids, list):
+                raise ClaimError("claim ligand_file_ids must be a list")
+            ligand_smiles = data.get("ligand_smiles") or []
+            if not isinstance(ligand_smiles, list):
+                raise ClaimError("claim ligand_smiles must be a list")
+            ligand_paths = data.get("ligand_paths") or {}
+            if not isinstance(ligand_paths, dict):
+                raise ClaimError("claim ligand_paths must be a dict")
+            exhaustiveness = int(data.get("exhaustiveness", 8) or 8)
+            num_poses = int(data.get("num_poses", 9) or 9)
+            seed = data.get("seed")
+            if seed is not None:
+                seed = int(seed)
+            box_center = data.get("box_center")
+            box_size = data.get("box_size")
+            return ClaimedPrepJob(
+                prep_job_id=prep_job_id,
+                run_token=run_token,
+                job_type=job_type,
+                receptor_file_id=data.get("receptor_file_id"),
+                ligand_file_ids=ligand_file_ids,
+                ligand_smiles=ligand_smiles,
+                ligand_paths=ligand_paths,
+                box_center=box_center,
+                box_size=box_size,
+                exhaustiveness=exhaustiveness,
+                num_poses=num_poses,
+                seed=seed,
                 source_path=source_path,
                 work_dir=work_dir,
             )

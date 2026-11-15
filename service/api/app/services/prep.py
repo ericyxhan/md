@@ -64,6 +64,8 @@ def prep_job_label(prep_job: PrepJob) -> str:
     if prep_job.type == "membrane_embed":
         lipid = request.get("lipid")
         return f"Membrane embedding · {lipid}" if lipid else "Membrane embedding"
+    if prep_job.type == "docking":
+        return "Docking"
     name = request.get("name")
     return name or "System preparation"
 
@@ -264,6 +266,52 @@ def queue_membrane_embed(
 
     # The prep worker will claim this job and execute packmol-memgen.
     # Nothing more to do here.
+
+
+def queue_docking(
+    *,
+    prep_job_id: str,
+    owner: str,
+    receptor_file_id: str,
+    ligand_file_ids: list[str],
+    ligand_smiles: list[str],
+    box_center: list[float] | None,
+    box_size: list[float] | None,
+    exhaustiveness: int,
+    num_poses: int,
+    seed: int | None,
+    settings: Settings | None = None,
+    storage: LocalStorage | None = None,
+) -> None:
+    """Queue a docking job.
+
+    Validates the receptor (and any ligand files) exist and are readable, then
+    leaves the job in ``queued`` status for the prep worker.
+    """
+
+    settings = settings or get_settings()
+    storage = storage or LocalStorage(settings)
+
+    with _session_scope(settings) as factory:
+        with closing(factory()) as session:
+            # Validate receptor
+            validate_prep_input(
+                storage=storage,
+                session=session,
+                protein_file_id=receptor_file_id,
+                owner=owner,
+            )
+            # Validate ligand files
+            for lid in ligand_file_ids:
+                rec = session.get(FileRecord, lid)
+                if rec is None or rec.owner_id != owner:
+                    raise APIError(404, "file_not_found", f"Ligand file {lid} not found")
+            job = session.get(PrepJob, prep_job_id)
+            if job is None:
+                return
+            job.status = "queued"
+            job.updated_at = utcnow_iso()
+            session.commit()
 
 
 def finish_prep_job(

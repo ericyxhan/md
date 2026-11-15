@@ -14,6 +14,7 @@ import {
   ScrollText,
   Settings,
   Shield,
+  Target,
   Users,
   X,
 } from "lucide-react";
@@ -38,11 +39,12 @@ const workspaceNav = [
 const preparationNav = [
   { to: "/prep/system-prep", label: "System preparation", icon: Layers },
   { to: "/prep/membrane", label: "Membrane embedding", icon: Shield },
+  { to: "/prep/docking", label: "Docking", icon: Target },
 ];
 
 // Roadmap only.  These are not navigation targets, so they are not links;
 // the marketing site carries the same list.
-const roadmap = ["Docking", "Free energy", "Property prediction"];
+const roadmap = ["Free energy", "Property prediction"];
 
 function NavItem({
   to,

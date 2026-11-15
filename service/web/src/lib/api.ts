@@ -18,6 +18,8 @@ import type {
   LogEntry,
   LogList,
   LogTail,
+  DockingOut,
+  DockingRequest,
   MembraneEmbedOut,
   MembraneEmbedRequest,
   PDBInspection,
@@ -445,6 +447,15 @@ export function requestMembraneEmbed(
   payload: MembraneEmbedRequest,
 ): Promise<MembraneEmbedOut> {
   return request<MembraneEmbedOut>("/prep/membrane", {
+    method: "POST",
+    body: payload,
+  });
+}
+
+export function requestDocking(
+  payload: DockingRequest,
+): Promise<DockingOut> {
+  return request<DockingOut>("/prep/docking", {
     method: "POST",
     body: payload,
   });

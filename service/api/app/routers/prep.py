@@ -12,6 +12,8 @@ from ..errors import APIError
 from ..models import FileRecord, PrepJob
 from ..schemas import (
     MembraneEmbedOut,
+    DockingRequest,
+    DockingOut,
     MembraneEmbedRequest,
     PrepJobStatus,
     SystemPrepOut,
@@ -22,6 +24,7 @@ from ..services.events import add_prep_event
 from ..services.prep import (
     fetch_pdb_file,
     prep_job_label,
+    queue_docking,
     queue_membrane_embed,
     queue_system_prep,
 )
@@ -347,3 +350,87 @@ def cancel_prep_job(
     with session_factory() as session:
         job = cancel_prep(session, prep_job_id)
         return {"status": job.status}
+
+
+@router.post("/prep/docking", response_model=DockingOut)
+def request_docking(
+    request: Request,
+    body: DockingRequest,
+    owner: str = Depends(require_owner),
+) -> DockingOut:
+    """Queue a docking job.
+
+    Returns immediately; poll ``GET /api/v1/prep/jobs/{prep_job_id}``.
+    """
+
+    settings = request.app.state.settings
+    if not settings.docking_enabled:
+        raise APIError(
+            503,
+            "prep_not_configured",
+            "Docking is not configured on this server",
+        )
+
+    prep_job_id = str(uuid.uuid4())
+    session_factory = create_session_factory(request.app.state.engine)
+
+    with session_factory() as session:
+        job = PrepJob(
+            id=prep_job_id,
+            owner_id=owner,
+            type="docking",
+            status="pending",
+            request_json=json.dumps(
+                {
+                    "type": "docking",
+                    "receptor_file_id": body.receptor_file_id,
+                    "ligand_file_ids": body.ligand_file_ids,
+                    "ligand_smiles": body.ligand_smiles,
+                    "box_center": body.box_center,
+                    "box_size": body.box_size,
+                    "exhaustiveness": body.exhaustiveness,
+                    "num_poses": body.num_poses,
+                    "seed": body.seed,
+                },
+                separators=(",", ":"),
+            ),
+            created_at=utcnow_iso(),
+            updated_at=utcnow_iso(),
+        )
+        session.add(job)
+        from ..services.events import add_prep_event
+        add_prep_event(
+            session,
+            prep_job_id,
+            "created",
+            "Docking queued",
+            {"receptor_file_id": body.receptor_file_id},
+        )
+        session.commit()
+
+    try:
+        queue_docking(
+            prep_job_id=prep_job_id,
+            owner=owner,
+            receptor_file_id=body.receptor_file_id,
+            ligand_file_ids=body.ligand_file_ids,
+            ligand_smiles=body.ligand_smiles,
+            box_center=body.box_center,
+            box_size=body.box_size,
+            exhaustiveness=body.exhaustiveness,
+            num_poses=body.num_poses,
+            seed=body.seed,
+            settings=settings,
+        )
+    except APIError:
+        with session_factory() as session:
+            job = session.get(PrepJob, prep_job_id)
+            if job is not None:
+                job.status = "failed"
+                job.error_message = "Input validation failed"
+                job.completed_at = utcnow_iso()
+                job.updated_at = utcnow_iso()
+                session.commit()
+        raise
+
+    return DockingOut(prep_job_id=prep_job_id, status="queued")

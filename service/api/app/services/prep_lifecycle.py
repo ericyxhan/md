@@ -114,6 +114,19 @@ def claim_prep(
         }
         if job_type == "system_prep":
             response_kwargs["steps"] = request.get("steps", [])
+        elif job_type == "docking":
+            response_kwargs.update(
+                {
+                    "receptor_file_id": request.get("receptor_file_id"),
+                    "ligand_file_ids": request.get("ligand_file_ids", []),
+                    "ligand_smiles": request.get("ligand_smiles", []),
+                    "box_center": request.get("box_center"),
+                    "box_size": request.get("box_size"),
+                    "exhaustiveness": request.get("exhaustiveness", 8),
+                    "num_poses": request.get("num_poses", 9),
+                    "seed": request.get("seed"),
+                }
+            )
         else:
             response_kwargs.update(
                 {

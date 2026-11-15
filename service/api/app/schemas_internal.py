@@ -174,6 +174,16 @@ class PrepClaimResponse(InternalModel):
     # Common
     source_path: str | None = None
     work_dir: str | None = None
+    # Docking fields
+    receptor_file_id: str | None = None
+    ligand_file_ids: list[str] = []
+    ligand_smiles: list[str] = []
+    ligand_paths: dict[str, str] = {}
+    box_center: list[float] | None = None
+    box_size: list[float] | None = None
+    exhaustiveness: int = 8
+    num_poses: int = 9
+    seed: int | None = None
 
 
 class PrepProgressRequest(InternalModel):

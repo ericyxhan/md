@@ -115,6 +115,45 @@ def claim(
             work_dir=str(work_dir),
         )
 
+    if job_type == "docking":
+        receptor_file_id = request_data.get("receptor_file_id")
+        source_path = None
+        if receptor_file_id:
+            file_record = session.get(FileRecord, receptor_file_id)
+            if file_record is None:
+                raise APIError(
+                    404, "file_not_found", f"Source file {receptor_file_id} not found"
+                )
+            source_path = str(storage.absolute_key(file_record.storage_key))
+
+        # Resolve ligand file paths.
+        ligand_paths = {}
+        for lid in request_data.get("ligand_file_ids", []) or []:
+            lig_record = session.get(FileRecord, lid)
+            if lig_record is None:
+                raise APIError(
+                    404, "file_not_found", f"Ligand file {lid} not found"
+                )
+            ligand_paths[lid] = str(storage.absolute_key(lig_record.storage_key))
+
+        return PrepClaimResponse(
+            prep_job_id=result.prep_job_id,
+            run_token=result.run_token,
+            owner_id=job.owner_id,
+            job_type=job_type,
+            source_path=source_path,
+            work_dir=str(work_dir),
+            receptor_file_id=receptor_file_id,
+            ligand_file_ids=request_data.get("ligand_file_ids", []) or [],
+            ligand_smiles=request_data.get("ligand_smiles", []) or [],
+            ligand_paths=ligand_paths,
+            box_center=request_data.get("box_center"),
+            box_size=request_data.get("box_size"),
+            exhaustiveness=request_data.get("exhaustiveness", 8),
+            num_poses=request_data.get("num_poses", 9),
+            seed=request_data.get("seed"),
+        )
+
     # membrane_embed (default)
     file_record = session.get(FileRecord, result.protein_file_id)
     if file_record is None:

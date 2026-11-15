@@ -801,6 +801,53 @@ class MembraneEmbedOut(BaseModel):
     topology_file_id: str | None = None
     error: str | None = None
 
+class DockingRequest(StrictModel):
+    """Request to dock one or more ligands into a receptor structure."""
+
+    receptor_file_id: str = Field(
+        min_length=1, max_length=64,
+        description="Uploaded receptor structure (PDB or mmCIF) file ID",
+    )
+    ligand_file_ids: list[str] = Field(
+        default_factory=list,
+        max_length=20,
+        description="Uploaded ligand file IDs (SDF, MOL, MOL2, PDB, mmCIF)",
+    )
+    ligand_smiles: list[str] = Field(
+        default_factory=list,
+        max_length=20,
+        description="SMILES strings for ligands without a file",
+    )
+    box_center: list[float] | None = Field(
+        default=None,
+        description="Search-box center (x, y, z) in Angstroms. Auto-detected when omitted.",
+    )
+    box_size: list[float] | None = Field(
+        default=None,
+        description="Search-box size (x, y, z) in Angstroms. Auto-detected when omitted.",
+    )
+    exhaustiveness: int = Field(default=8, ge=1, le=64)
+    num_poses: int = Field(default=9, ge=1, le=20)
+    seed: int | None = Field(default=None)
+
+    @model_validator(mode="after")
+    def _validate_ligands(self) -> "DockingRequest":
+        if not self.ligand_file_ids and not self.ligand_smiles:
+            raise ValueError("At least one ligand (file or SMILES) is required")
+        if self.box_center is not None and len(self.box_center) != 3:
+            raise ValueError("box_center must have 3 values")
+        if self.box_size is not None and len(self.box_size) != 3:
+            raise ValueError("box_size must have 3 values")
+        return self
+
+
+class DockingOut(BaseModel):
+    prep_job_id: str
+    status: str
+    docked_complex_file_id: str | None = None
+    poses_file_id: str | None = None
+    error: str | None = None
+
 
 class PrepJobStatus(BaseModel):
     id: str

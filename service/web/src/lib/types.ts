@@ -89,6 +89,12 @@ export interface Capabilities {
       max_box_padding_nm: number;
       supported_input_formats: string[];
     };
+    docking?: {
+      enabled: boolean;
+      supported_input_formats: string[];
+      supported_ligand_inputs: string[];
+      max_ligands: number;
+    };
   };
 }
 
@@ -528,6 +534,25 @@ export interface MembraneEmbedOut {
   status: string;
   embedded_pdb_file_id: string | null;
   topology_file_id: string | null;
+  error: string | null;
+}
+
+export interface DockingRequest {
+  receptor_file_id: string;
+  ligand_file_ids: string[];
+  ligand_smiles: string[];
+  box_center?: number[] | null;
+  box_size?: number[] | null;
+  exhaustiveness: number;
+  num_poses: number;
+  seed?: number | null;
+}
+
+export interface DockingOut {
+  prep_job_id: string;
+  status: string;
+  docked_complex_file_id: string | null;
+  poses_file_id: string | null;
   error: string | null;
 }
 

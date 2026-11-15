@@ -7,3 +7,6 @@ numba==0.59.1
 scipy==1.13.1
 pdb2pqr==3.8.0
 gemmi==0.7.5
+vina==1.2.7
+meeko==0.8.0
+rdkit==2026.3.1

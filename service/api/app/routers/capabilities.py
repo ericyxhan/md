@@ -91,6 +91,12 @@ def capabilities(
                 "lipids": ["POPC", "POPE", "DPPC", "DLPC", "DSPC", "SOPC"],
                 "max_box_padding_nm": 5.0,
                 "supported_input_formats": [".pdb", ".cif", ".mmcif"],
-            }
+            },
+            "docking": {
+                "enabled": bool(settings.docking_enabled),
+                "supported_input_formats": [".pdb", ".cif", ".mmcif", ".sdf", ".mol", ".mol2"],
+                "supported_ligand_inputs": ["file", "smiles"],
+                "max_ligands": 20,
+            },
         },
     }
