@@ -1,4 +1,4 @@
-import { Zap, ShieldCheck, Eye, GitBranch, Cpu, Download, Layers, Users } from 'lucide-react'
+import { Zap, ShieldCheck, Eye, GitBranch, Cpu, Download, Layers, Users, Target } from 'lucide-react'
 import Card from '../ui/Card'
 import SectionHeader from './SectionHeader'
 import Section from '../layout/Section'
@@ -12,6 +12,7 @@ const features = [
   { icon: Cpu, title: 'Real OpenMM physics', body: 'Amber14 + OpenFF 2.3.0 force fields, NVT/NPT ensembles, HMR, and a CUDA backend on real GPUs.' },
   { icon: Download, title: 'Everything downloadable', body: 'Trajectories, states, configs, logs — registered as artifacts with confined, ID-only downloads.' },
   { icon: Layers, title: 'Membrane embedding', body: 'Embed proteins in POPC/POPE/DPPC bilayers with Packmol-Memgen before simulation.' },
+  { icon: Target, title: 'Molecular docking', body: 'Predict binding poses with AutoDock Vina, then simulate the top complex — no separate tooling.' },
   { icon: Users, title: 'Built for teams', body: 'Self-service accounts, an administrator console, and per-owner queues. Share a box, not a password.' },
 ]
 

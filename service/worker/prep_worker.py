@@ -919,7 +919,7 @@ class PrepWorker:
                 v.set_receptor(str(receptor_pdbqt))
                 v.set_ligand_from_file(str(lig_pdbqt))
                 v.compute_vina_maps(center=box_center, box_size=box_size)
-                v.dock(exhaustiveness=exhaustiveness, n_poses=num_poses, seed=seed if seed is not None else None)
+                v.dock(exhaustiveness=exhaustiveness, n_poses=num_poses)
                 v.write_poses(str(out_poses), n_poses=num_poses, overwrite=True)
                 energies = v.energies()
             except Exception as exc:
@@ -930,8 +930,7 @@ class PrepWorker:
             try:
                 with all_poses_pdbqt.open("a") as f:
                     f.write(out_poses.read_text())
-                    f.write("
-")
+                    f.write("\n")
             except OSError:
                 pass
 
@@ -962,14 +961,11 @@ class PrepWorker:
                     if not first_model_lines:
                         first_model_lines = lig_lines
                     # renumber ligand atoms chain B
-                    combined = receptor_pdb.read_text().rstrip() + "
-"
+                    combined = receptor_pdb.read_text().rstrip() + "\n"
                     for ln in first_model_lines:
                         # change chain id to B if needed; keep as is
-                        combined += ln + "
-"
-                    combined += "END
-"
+                        combined += ln + "\n"
+                    combined += "END\n"
                     top_complex_pdb = work_dir / "docked_complex.pdb"
                     top_complex_pdb.write_text(combined)
                 except Exception as exc:
@@ -979,9 +975,7 @@ class PrepWorker:
 
         # write scores
         try:
-            scores_csv.write_text("
-".join(scores_lines) + "
-")
+            scores_csv.write_text("\n".join(scores_lines) + "\n")
         except OSError:
             pass
 
