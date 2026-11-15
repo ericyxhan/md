@@ -6,7 +6,7 @@ import SectionHeader from '../components/marketing/SectionHeader'
 import { Check } from 'lucide-react'
 
 export default function Features() {
-  useSeo('Features — Lattice', 'Everything you need to run molecular dynamics in the browser.')
+  useSeo('Features — MolDy', 'Everything you need to run molecular dynamics in the browser.')
   const extra = [
     'Guided four-step wizard with a validate-before-run gate',
     'Live SSE event stream with reconnect and polling fallback',
@@ -30,7 +30,7 @@ export default function Features() {
           <div className="grid gap-10 lg:grid-cols-2">
             <div>
               <h3 className="text-2xl font-bold text-ink">Workflow depth</h3>
-              <p className="mt-3 text-ink-soft">Lattice is not a toy. It wraps a checkpointed OpenMM pipeline with real force fields and real ensembles.</p>
+              <p className="mt-3 text-ink-soft">MolDy is not a toy. It wraps a checkpointed OpenMM pipeline with real force fields and real ensembles.</p>
               <ul className="mt-6 space-y-2.5">
                 {extra.map((e) => (
                   <li key={e} className="flex items-start gap-3 text-sm text-ink-soft">

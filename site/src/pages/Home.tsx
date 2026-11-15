@@ -10,7 +10,7 @@ import Container from '../components/layout/Container'
 import Section from '../components/layout/Section'
 
 export default function Home() {
-  useSeo('Lattice — Molecular dynamics, free', 'The first platform for running complete molecular dynamics simulations — completely free. From structure file to trajectory in minutes.')
+  useSeo('MolDy — Molecular dynamics, free', 'The first platform for running complete molecular dynamics simulations — completely free. From structure file to trajectory in minutes.')
   return (
     <>
       <Hero />

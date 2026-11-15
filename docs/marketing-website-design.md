@@ -1,9 +1,9 @@
-# Lattice marketing website — design & implementation plan
+# MolDy marketing website — design & implementation plan
 
 ## 1. First principles
 
 ### What is the product?
-Lattice is a free, web-based molecular dynamics (MD) simulation platform. A user uploads a
+MolDy is a free, web-based molecular dynamics (MD) simulation platform. A user uploads a
 biomolecular structure and gets a solvated, parameterized, checkpointed MD run with live
 monitoring and downloadable trajectories — without a cluster, a license, or a command line.
 
@@ -14,7 +14,7 @@ monitoring and downloadable trajectories — without a cluster, a license, or a 
 - Students and researchers with no HPC budget.
 
 ### What must the site do?
-1. Explain what Lattice is in one sentence.
+1. Explain what MolDy is in one sentence.
 2. State, unambiguously, that it is the first platform of its kind for running MD simulations
    completely free.
 3. Show how it works (upload → build → simulate → inspect).
@@ -95,7 +95,7 @@ site/
 ```
 
 ### Configuration
-- `VITE_APP_URL` → app console URL used in all CTAs (default `https://app.lattice.md`).
+- `VITE_APP_URL` → app console URL used in all CTAs (default `https://app.moldy.md`).
 - `VITE_CONTACT_EMAIL`, `VITE_GITHUB_URL` optional.
 
 ### Hosting

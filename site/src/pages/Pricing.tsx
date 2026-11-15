@@ -6,11 +6,11 @@ import { Check } from 'lucide-react'
 import { APP_URL } from '../lib/config'
 
 export default function Pricing() {
-  useSeo('Pricing — Lattice', 'Free. Forever.')
+  useSeo('Pricing — MolDy', 'Free. Forever.')
   return (
     <Section>
       <Container>
-        <SectionHeader eyebrow="Pricing" title="Free. Forever." description="No tiers, no trials, no credit card. Lattice is completely free for research and education." />
+        <SectionHeader eyebrow="Pricing" title="Free. Forever." description="No tiers, no trials, no credit card. MolDy is completely free for research and education." />
         <div className="mx-auto mt-12 max-w-md">
           <div className="rounded-card border-2 border-brand-500 bg-surface p-8 shadow-md">
             <p className="text-xs font-semibold uppercase tracking-wider text-brand-600">Free</p>

@@ -4,11 +4,11 @@ import Container from '../components/layout/Container'
 import SectionHeader from '../components/marketing/SectionHeader'
 
 export default function Science() {
-  useSeo('Science — Lattice', 'The methodology behind Lattice simulations.')
+  useSeo('Science — MolDy', 'The methodology behind MolDy simulations.')
   return (
     <Section>
       <Container>
-        <SectionHeader eyebrow="Science" title="Reproducible MD, open methodology" description="Lattice runs real physics with published force fields and a checkpointed pipeline." />
+        <SectionHeader eyebrow="Science" title="Reproducible MD, open methodology" description="MolDy runs real physics with published force fields and a checkpointed pipeline." />
         <div className="mt-12 grid gap-8 lg:grid-cols-2">
           <div className="space-y-4 text-ink-soft">
             <h3 className="text-lg font-semibold text-ink">Engine</h3>

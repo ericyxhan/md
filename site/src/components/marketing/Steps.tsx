@@ -5,7 +5,7 @@ import Container from '../layout/Container'
 
 const steps = [
   { icon: Upload, n: '01', title: 'Upload a structure', body: 'PDB, mmCIF, or SDF — or fetch a 4-character RCSB PDB ID. Protein + ligand, or a single complex.' },
-  { icon: Cog, n: '02', title: 'Build the system', body: 'Lattice parameterizes with OpenFF, solvates, adds ions, and writes a validated config. Review before running.' },
+  { icon: Cog, n: '02', title: 'Build the system', body: 'MolDy parameterizes with OpenFF, solvates, adds ions, and writes a validated config. Review before running.' },
   { icon: PlayCircle, n: '03', title: 'Run the simulation', body: 'Minimization, equilibration stages, then production. Watch live progress, temperature, density, and speed.' },
   { icon: BarChart3, n: '04', title: 'Inspect & download', body: 'Trajectories, checkpoints, logs, and configs — all registered as artifacts you can download or replay.' },
 ]

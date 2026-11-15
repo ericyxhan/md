@@ -20,7 +20,7 @@ export default function Footer() {
                 <line x1="11" y1="22" x2="21" y2="22" />
               </g>
             </svg>
-            <span className="text-base font-semibold text-ink">Lattice</span>
+            <span className="text-base font-semibold text-ink">MolDy</span>
           </div>
           <p className="mt-3 text-sm text-muted">
             The first platform for running molecular dynamics simulations — completely free.
@@ -63,7 +63,7 @@ export default function Footer() {
       </Container>
       <div className="border-t border-line">
         <Container className="flex flex-col items-center justify-between gap-2 py-6 text-xs text-faint sm:flex-row">
-          <span>© {new Date().getFullYear()} Lattice. All rights reserved.</span>
+          <span>© {new Date().getFullYear()} MolDy. All rights reserved.</span>
           <span>Built on OpenMM. Free for research and education.</span>
         </Container>
       </div>

@@ -5,7 +5,7 @@ import SectionHeader from '../components/marketing/SectionHeader'
 import { APP_URL } from '../lib/config'
 
 export default function Docs() {
-  useSeo('Documentation — Lattice', 'Getting started with Lattice.')
+  useSeo('Documentation — MolDy', 'Getting started with MolDy.')
   return (
     <Section>
       <Container>

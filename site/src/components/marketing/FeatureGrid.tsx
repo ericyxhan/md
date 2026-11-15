@@ -5,7 +5,7 @@ import Section from '../layout/Section'
 import Container from '../layout/Container'
 
 const features = [
-  { icon: Zap, title: 'End-to-end automation', body: 'Upload a structure and Lattice parameterizes, solvates, minimizes, equilibrates, and runs production — no TOML, no cluster.' },
+  { icon: Zap, title: 'End-to-end automation', body: 'Upload a structure and MolDy parameterizes, solvates, minimizes, equilibrates, and runs production — no TOML, no cluster.' },
   { icon: ShieldCheck, title: 'Safe by default', body: 'Pydantic-validated inputs, confined file paths, per-account isolation, and signed sessions. Your data stays yours.' },
   { icon: Eye, title: 'Live, legible progress', body: 'Stage timelines, SSE event streams, and progress snapshots make a multi-hour GPU job readable from a phone.' },
   { icon: GitBranch, title: 'Checkpointed & resumable', body: 'Every stage hands off a portable state.xml. Cancel, resume, restart a stage, or reparameterize without losing work.' },
@@ -22,7 +22,7 @@ export default function FeatureGrid({ compact = false }: { compact?: boolean }) 
         <SectionHeader
           eyebrow="Capabilities"
           title="Everything you need to run MD, nothing you don't"
-          description="Lattice wraps a checkpointed OpenMM pipeline in a guided web console. Defaults first, knobs second."
+          description="MolDy wraps a checkpointed OpenMM pipeline in a guided web console. Defaults first, knobs second."
         />
         <div className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
           {features.map((f) => (

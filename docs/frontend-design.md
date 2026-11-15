@@ -1,6 +1,6 @@
-# Lattice — frontend design
+# MolDy — frontend design
 
-Working product name: **Lattice**. The frontend is a single-page web console for
+Working product name: **MolDy**. The frontend is a single-page web console for
 the existing MD simulation service. It turns the API's job, stage, event, log,
 and artifact primitives into a guided workflow that a bench scientist can use
 without learning the CLI or the TOML configuration schema.

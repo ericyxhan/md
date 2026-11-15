@@ -5,7 +5,7 @@ import Container from '../components/layout/Container'
 import SectionHeader from '../components/marketing/SectionHeader'
 
 export default function HowItWorks() {
-  useSeo('How it works — Lattice', 'From structure file to trajectory in four steps.')
+  useSeo('How it works — MolDy', 'From structure file to trajectory in four steps.')
   return (
     <>
       <Section>
@@ -19,11 +19,11 @@ export default function HowItWorks() {
           <div className="mx-auto max-w-3xl space-y-8 text-ink-soft">
             <div>
               <h3 className="text-xl font-semibold text-ink">1. Upload</h3>
-              <p className="mt-2">Drop a structure file or enter a PDB ID. Lattice accepts protein + ligand separately or a single complex, and validates suffixes and atom counts.</p>
+              <p className="mt-2">Drop a structure file or enter a PDB ID. MolDy accepts protein + ligand separately or a single complex, and validates suffixes and atom counts.</p>
             </div>
             <div>
               <h3 className="text-xl font-semibold text-ink">2. Build</h3>
-              <p className="mt-2">Set pH, padding, and ionic strength. Lattice parameterizes with OpenFF, solvates, adds ions, and writes a validated config.toml you can review.</p>
+              <p className="mt-2">Set pH, padding, and ionic strength. MolDy parameterizes with OpenFF, solvates, adds ions, and writes a validated config.toml you can review.</p>
             </div>
             <div>
               <h3 className="text-xl font-semibold text-ink">3. Simulate</h3>

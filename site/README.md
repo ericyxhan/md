@@ -1,4 +1,4 @@
-# Lattice marketing website
+# MolDy marketing website
 
 Static marketing site (Vite + React + Tailwind 4). See `../docs/marketing-website.md` for the hosting
 decision and deploy notes.

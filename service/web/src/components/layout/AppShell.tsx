@@ -110,7 +110,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         <Logo className="size-7 text-brand-700" />
         <div className="min-w-0">
           <p className="truncate text-[14px] font-semibold tracking-[-0.01em] text-ink">
-            Lattice
+            MolDy
           </p>
           <p className="truncate text-[10.5px] font-medium uppercase tracking-[0.14em] text-faint">
             MD console
@@ -294,7 +294,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </button>
           <div className="flex items-center gap-2">
             <Logo className="size-6 text-brand-700" />
-            <span className="text-sm font-semibold tracking-tight">Lattice</span>
+            <span className="text-sm font-semibold tracking-tight">MolDy</span>
           </div>
         </header>
 

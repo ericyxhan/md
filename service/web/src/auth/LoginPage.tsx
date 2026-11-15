@@ -53,7 +53,7 @@ export function LoginPage({ onRegister }: { onRegister: () => void }) {
         <div className="relative flex items-center gap-3">
           <Logo className="size-9 text-brand-200" />
           <div>
-            <p className="text-[15px] font-semibold tracking-tight">Lattice</p>
+            <p className="text-[15px] font-semibold tracking-tight">MolDy</p>
             <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-brand-200/80">
               Molecular Dynamics
             </p>
@@ -100,7 +100,7 @@ export function LoginPage({ onRegister }: { onRegister: () => void }) {
           <div className="mb-9 flex items-center gap-2.5 lg:hidden">
             <Logo className="size-8 text-brand-700" />
             <span className="text-[15px] font-semibold tracking-tight">
-              Lattice
+              MolDy
             </span>
           </div>
 

@@ -37,7 +37,7 @@ export default function Hero() {
             <span className="text-brand-600">run in your browser.</span>
           </h1>
           <p className="mt-6 text-lg text-ink-soft sm:text-xl">
-            Lattice is the first platform for running complete molecular dynamics simulations
+            MolDy is the first platform for running complete molecular dynamics simulations
             — from a structure file to a solvated, parameterized, production-ready trajectory —
             <span className="font-semibold text-ink"> completely free.</span>
           </p>
@@ -67,7 +67,7 @@ export default function Hero() {
               <span className="h-2.5 w-2.5 rounded-full bg-red-400" />
               <span className="h-2.5 w-2.5 rounded-full bg-amber-400" />
               <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
-              <span className="ml-3 font-mono text-xs text-muted">lattice.app · jobs/7yae-production</span>
+              <span className="ml-3 font-mono text-xs text-muted">moldy.app · jobs/7yae-production</span>
             </div>
             <div className="grid gap-0 sm:grid-cols-5">
               <div className="col-span-2 border-r border-line p-5">

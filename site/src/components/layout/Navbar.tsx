@@ -30,7 +30,7 @@ export default function Navbar() {
               <line x1="11" y1="22" x2="21" y2="22" />
             </g>
           </svg>
-          <span className="text-lg font-semibold tracking-tight text-ink">Lattice</span>
+          <span className="text-lg font-semibold tracking-tight text-ink">MolDy</span>
         </Link>
 
         <nav className="hidden items-center gap-1 md:flex">

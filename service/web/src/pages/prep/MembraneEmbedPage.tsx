@@ -239,7 +239,7 @@ function MembraneEmbedJobView({ prepJobId }: { prepJobId: string }) {
                             {index === 0 ? "Embedded system (PDB)" : "Membrane topology (PSF)"}
                           </p>
                           <p className="text-[11px] text-faint">
-                            Download to use outside Lattice
+                            Download to use outside MolDy
                           </p>
                         </div>
                         <a

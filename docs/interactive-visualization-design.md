@@ -1,4 +1,4 @@
-# Lattice — interactive visualization design
+# MolDy — interactive visualization design
 
 This document extends `docs/frontend-design.md`. The shipped console is
 functional but *documentary*: forms collect a request, text feeds report
@@ -105,7 +105,7 @@ Trade-offs and mitigations:
   import inside a single `StructureViewport` wrapper component; the main
   bundle never imports molstar statically.
 - Its full plugin UI is busy → configure a minimal layout (no left panel, no
-  log) and drive it from our own toolbar, so it reads as part of Lattice.
+  log) and drive it from our own toolbar, so it reads as part of MolDy.
 
 **Rejected alternatives** (kept here for the record):
 

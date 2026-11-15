@@ -321,7 +321,7 @@ function SystemPrepJobView({ prepJobId }: { prepJobId: string }) {
                             Prepared structure (PDB)
                           </p>
                           <p className="text-[11px] text-faint">
-                            Download to use outside Lattice
+                            Download to use outside MolDy
                           </p>
                         </div>
                         <a

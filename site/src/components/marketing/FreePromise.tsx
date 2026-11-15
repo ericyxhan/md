@@ -21,7 +21,7 @@ export default function FreePromise() {
               align="left"
               eyebrow="Free, forever"
               title="The first platform of its kind — completely free"
-              description="MD simulation has always required a cluster, a license, and a specialist. Lattice removes all three. Run real, reproducible molecular dynamics at no cost."
+              description="MD simulation has always required a cluster, a license, and a specialist. MolDy removes all three. Run real, reproducible molecular dynamics at no cost."
             />
             <ul className="mt-8 space-y-3">
               {points.map((p) => (

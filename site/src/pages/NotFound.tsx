@@ -4,7 +4,7 @@ import Container from '../components/layout/Container'
 import { Link } from 'react-router-dom'
 
 export default function NotFound() {
-  useSeo('Not found — Lattice', 'Page not found.')
+  useSeo('Not found — MolDy', 'Page not found.')
   return (
     <Section>
       <Container className="text-center">
