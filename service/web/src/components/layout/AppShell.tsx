@@ -25,23 +25,30 @@ import { Button } from "../ui/Button";
 import { Logo } from "./Logo";
 
 // The sidebar is grouped by what the user is working on, then by the
-// pipeline that feeds it.  "Workspace" holds their own simulations and the
-// workflows that group them; "Preparation" holds the upstream steps that
-// produce a system to simulate.
+// Two tiers, mirroring how a researcher actually works:
+//
+//   Tools        - single-purpose operations (system prep, membrane embed,
+//                  docking).  Useful on their own, and the building blocks of
+//                  an experiment.
+//   Experiments  - higher-level orchestration that composes tools into a
+//                  full in-silico study (pipelines, base systems).
+//
+// "Workspace" holds the user's own simulations and activity feed.
 const workspaceNav = [
-  { to: "/pipelines", label: "Pipelines", icon: Workflow },
   { to: "/", label: "Overview", icon: Gauge, end: true },
   { to: "/jobs", label: "Simulations", icon: Activity, end: false },
-  { to: "/workflows", label: "Workflows", icon: Layout, end: false },
   { to: "/activity", label: "Activity", icon: Bell, end: false },
 ];
 
-// Ordered by the pipeline: system preparation produces the prepared system
-// that membrane embedding then embeds in a bilayer.
-const preparationNav = [
+const toolsNav = [
   { to: "/prep/system-prep", label: "System preparation", icon: Layers },
   { to: "/prep/membrane", label: "Membrane embedding", icon: Shield },
   { to: "/prep/docking", label: "Docking", icon: Target },
+];
+
+const experimentsNav = [
+  { to: "/pipelines", label: "Pipelines", icon: Workflow },
+  { to: "/workflows", label: "Workflows", icon: Layout, end: false },
 ];
 
 // Roadmap only.  These are not navigation targets, so they are not links;
@@ -148,10 +155,19 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         </div>
 
         <p className="px-2.5 pb-1.5 pt-6 text-[10.5px] font-semibold uppercase tracking-[0.13em] text-faint">
-          Preparation
+          Tools
         </p>
         <div className="space-y-0.5">
-          {preparationNav.map((item) => (
+          {toolsNav.map((item) => (
+            <NavItem key={item.to} {...item} onNavigate={onNavigate} />
+          ))}
+        </div>
+
+        <p className="px-2.5 pb-1.5 pt-6 text-[10.5px] font-semibold uppercase tracking-[0.13em] text-faint">
+          Experiments
+        </p>
+        <div className="space-y-0.5">
+          {experimentsNav.map((item) => (
             <NavItem key={item.to} {...item} onNavigate={onNavigate} />
           ))}
         </div>
