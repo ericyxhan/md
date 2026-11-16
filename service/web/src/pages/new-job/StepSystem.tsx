@@ -113,6 +113,23 @@ export function StepSystem({
         </Field>
 
         <Field
+          label="Box shape"
+          hint="Periodic box shape. Non-cubic shapes reduce water for the same padding."
+          htmlFor="box-shape"
+        >
+          <select
+            id="box-shape"
+            value={parameterization.box_shape ?? "cube"}
+            onChange={(event) => patch({ box_shape: event.target.value })}
+            className="w-full rounded-md border border-line px-3 py-2 text-sm"
+          >
+            <option value="cube">Cube</option>
+            <option value="dodecahedron">Dodecahedron</option>
+            <option value="octahedron">Truncated octahedron</option>
+          </select>
+        </Field>
+
+        <Field
           label="Solvent padding"
           hint="Buffer distance around the solute."
           htmlFor="padding"

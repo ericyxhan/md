@@ -259,6 +259,10 @@ class ParameterizationSpec(StrictModel):
         default="tip3p",
         description="Water model passed to Modeller.addSolvent.",
     )
+    box_shape: str = Field(
+        default="cube",
+        description="Periodic box shape: cube, dodecahedron, or octahedron.",
+    )
     biomolecule_types: list[BiomoleculeType] = Field(
         default_factory=lambda: ["protein"],
         max_length=5,

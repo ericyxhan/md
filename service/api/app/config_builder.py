@@ -179,6 +179,7 @@ def build_config_document(
             "positive_ion": parameterization["positive_ion"],
             "negative_ion": parameterization["negative_ion"],
             "solvent_model": parameterization["solvent_model"],
+            "box_shape": parameterization.get("box_shape", "cube"),
             "ccd_cache": str(
                 Path(settings.data_root).expanduser().resolve() / "cache" / "ccd"
             ),

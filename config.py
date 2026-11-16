@@ -544,6 +544,7 @@ class ParameterizationConfig:
     positive_ion: str = "Na+"
     negative_ion: str = "Cl-"
     solvent_model: str = "tip3p"
+    box_shape: str = "cube"
 
     def validate(self, context: str = "parameterization") -> None:
         if not self.forcefields:
@@ -602,6 +603,13 @@ class ParameterizationConfig:
             raise ConfigError(
                 f"{context}.solvent_model must be one of: "
                 + ", ".join(sorted(allowed_solvent_models))
+            )
+
+        allowed_box_shapes = {"cube", "dodecahedron", "octahedron"}
+        if self.box_shape not in allowed_box_shapes:
+            raise ConfigError(
+                f"{context}.box_shape must be one of: "
+                + ", ".join(sorted(allowed_box_shapes))
             )
 
 
@@ -925,6 +933,7 @@ def _parse_parameterization(
             "positive_ion",
             "negative_ion",
             "solvent_model",
+            "box_shape",
         },
         context,
     )
@@ -976,6 +985,7 @@ def _parse_parameterization(
         positive_ion=_string(table, "positive_ion", "Na+", context),
         negative_ion=_string(table, "negative_ion", "Cl-", context),
         solvent_model=_string(table, "solvent_model", "tip3p", context),
+        box_shape=_string(table, "box_shape", "cube", context),
     )
     config.validate()
     return config

@@ -1541,6 +1541,7 @@ def prepare_system(
     positive_ion: str = "Na+",
     negative_ion: str = "Cl-",
     solvent_model: str = "tip3p",
+    box_shape: str = "cube",
 ) -> tuple[Path, Path, Path]:
     if (protein_path is None) == (complex_path is None):
         raise ValueError("Supply exactly one of protein_path or complex_path")
@@ -1702,6 +1703,7 @@ def prepare_system(
         forcefield,
         model=solvent_model,
         padding=padding_nm,
+        boxShape=box_shape,
         ionicStrength=ionic_strength_molar * unit.molar,
         positiveIon=positive_ion,
         negativeIon=negative_ion,
@@ -1829,6 +1831,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Water model passed to Modeller.addSolvent (tip3p, opc, ...).",
     )
     parser.add_argument(
+        "--box-shape",
+        default="cube",
+        choices=["cube", "dodecahedron", "octahedron"],
+        help="Periodic box shape passed to Modeller.addSolvent.",
+    )
+    parser.add_argument(
         "--ligand-charge",
         action="append",
         type=_ligand_charge_argument,
@@ -1928,6 +1936,7 @@ def main(argv: list[str] | None = None) -> int:
             positive_ion=positive_ion,
             negative_ion=negative_ion,
             solvent_model=solvent_model,
+            box_shape=args.box_shape,
         )
     except (RuntimeError, ValueError) as exc:
         print(f"Error: {exc}", file=sys.stderr)

@@ -179,6 +179,7 @@ export interface ParameterizationSpec {
   positive_ion: string;
   negative_ion: string;
   solvent_model: string;
+  box_shape?: string;
   biomolecule_types: Array<"protein" | "dna" | "rna" | "glycan" | "lipid">;
 }
 
