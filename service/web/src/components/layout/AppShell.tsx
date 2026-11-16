@@ -16,6 +16,7 @@ import {
   Shield,
   Target,
   Users,
+  Workflow,
   X,
 } from "lucide-react";
 import { useAuth } from "../../auth/AuthProvider";
@@ -28,6 +29,7 @@ import { Logo } from "./Logo";
 // workflows that group them; "Preparation" holds the upstream steps that
 // produce a system to simulate.
 const workspaceNav = [
+  { to: "/pipelines", label: "Pipelines", icon: Workflow },
   { to: "/", label: "Overview", icon: Gauge, end: true },
   { to: "/jobs", label: "Simulations", icon: Activity, end: false },
   { to: "/workflows", label: "Workflows", icon: Layout, end: false },

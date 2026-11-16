@@ -37,6 +37,9 @@ const NewJobPage = lazyWithReload(() =>
 const NotFoundPage = lazyWithReload(() =>
   import("./pages/NotFoundPage").then((m) => ({ default: m.NotFoundPage })),
 );
+const PipelinesPage = lazyWithReload(() =>
+  import("./pages/PipelinesPage").then((m) => ({ default: m.default })),
+);
 const WorkflowsPage = lazyWithReload(() =>
   import("./pages/WorkflowsPage").then((m) => ({ default: m.WorkflowsPage })),
 );
@@ -168,6 +171,7 @@ export default function App() {
           <Route path="/prep/system-prep/:prepJobId" element={<SystemPrepPage />} />
           <Route path="/workflows" element={<WorkflowsPage />} />
           <Route path="/workflows/:workflowId" element={<WorkflowDetailPage />} />
+          <Route path="/pipelines" element={<PipelinesPage />} />
           <Route path="/account" element={<AccountPage />} />
           <Route
             path="/admin/users"
