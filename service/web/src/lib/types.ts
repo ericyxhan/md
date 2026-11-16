@@ -400,6 +400,10 @@ export interface StructureSeriesOut {
   points: StructureSeriesPoint[];
 }
 
+export interface RmsfOut {
+  residues: Record<string, number>;
+}
+
 
 export interface JobPlan {
   valid: boolean;

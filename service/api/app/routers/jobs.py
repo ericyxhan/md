@@ -28,6 +28,7 @@ from ..schemas import (
     SeriesOut,
     StructureSeriesOut,
     StructureSeriesPoint,
+    RmsfOut,
     ViewFileOut,
     ViewListOut,
     ViewOut,
@@ -437,6 +438,31 @@ def get_job_structure_series(
         columns=data.get("columns", []),
         points=points,
     )
+
+
+
+
+@router.get("/{job_id}/analysis/rmsf", response_model=RmsfOut)
+def get_job_rmsf(
+    request: Request,
+    job_id: str,
+    owner: str = Depends(require_owner),
+    session: Session = Depends(get_session),
+) -> RmsfOut:
+    job = get_owned_job(session, owner, job_id)
+    storage = request.app.state.storage
+    artifacts = list_artifacts(session, job, kind="analysis")
+    candidates = [a for a in artifacts if a.relative_path.endswith("outputs/analysis/rmsf.json")]
+    if not candidates:
+        raise APIError(404, "rmsf_not_found", "No RMSF data is available for this job.")
+    path = artifact_path(storage, job, candidates[0])
+    if not path.is_file():
+        raise APIError(404, "rmsf_not_found", "RMSF file is unavailable.")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise APIError(500, "rmsf_read_failed", f"Could not read RMSF: {exc}") from exc
+    return RmsfOut(residues=data.get("residue_rmsf_nm", {}))
 
 
 

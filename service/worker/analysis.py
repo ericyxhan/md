@@ -169,13 +169,15 @@ def run_analysis(job_root: Path, log) -> list[Path]:
         if bb_idx is not None and len(bb_idx) > 0:
             rmsf = md.rmsf(ts, ts, 0, atom_indices=bb_idx)
             # map to residue indices
-            res_ids = [ts.topology.atom(a).residue.index for a in bb_idx]
-            # aggregate mean per residue
             from collections import defaultdict
             agg: dict[int, list[float]] = defaultdict(list)
             for a, r in zip(bb_idx, rmsf):
                 agg[ts.topology.atom(a).residue.index].append(float(r))
-            rmsf_per_residue = {str(k): float(sum(v) / len(v)) for k, v in agg.items()}
+            rmsf_per_residue = {}
+            for k, v in agg.items():
+                res = ts.topology.residue(k)
+                label = f"{res.chain.id}:{res.resSeq} {res.name}"
+                rmsf_per_residue[label] = float(sum(v) / len(v))
             rmsf_path = out_dir / "rmsf.json"
             rmsf_path.write_text(json.dumps({"residue_rmsf_nm": rmsf_per_residue}, indent=2))
             written.append(rmsf_path)

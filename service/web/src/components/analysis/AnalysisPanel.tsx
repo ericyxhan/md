@@ -1,7 +1,9 @@
 import { Suspense, useMemo } from "react";
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Plus, RotateCcw, Thermometer, Droplets, Activity, Package } from "lucide-react";
 import {
   useJobSeries,
+  useJobRmsf,
   useJobStructureSeries,
   useJobViews,
 } from "../../lib/queries";
@@ -28,6 +30,7 @@ export function AnalysisPanel({ jobId }: AnalysisPanelProps) {
   const views = useJobViews(jobId, true, false);
   const series = useJobSeries(jobId, true);
   const structureSeries = useJobStructureSeries(jobId, true);
+  const rmsf = useJobRmsf(jobId, true);
 
   if (views.isLoading || series.isLoading) {
     return (
@@ -186,6 +189,31 @@ export function AnalysisPanel({ jobId }: AnalysisPanelProps) {
             <SeriesChart points={structureSeries.data.points as any} column="helix_fraction" />
           </ChartCard>
         </div>
+      ) : null}
+
+      {/* RMSF bar chart */}
+      {rmsf.data && Object.keys(rmsf.data.residues).length > 0 ? (
+        <Card className="overflow-hidden">
+          <CardHeader title="Per-residue RMSF (Cα)" description="Top 20 most flexible residues (nm)." />
+          <CardBody className="px-5 pb-4">
+            <div className="h-[260px]">
+              <ResponsiveContainer width="100%" height={260}>
+                <BarChart
+                  data={Object.entries(rmsf.data.residues)
+                    .sort((a, b) => b[1] - a[1])
+                    .slice(0, 20)
+                    .map(([name, value]) => ({ name, value }))}
+                >
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="name" tick={{ fontSize: 9 }} angle={-45} textAnchor="end" height={60} />
+                  <YAxis />
+                  <Tooltip />
+                  <Bar dataKey="value" fill="#17a394" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </CardBody>
+        </Card>
       ) : null}
 
       {/* Trajectory player */}

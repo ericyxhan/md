@@ -26,6 +26,7 @@ import type {
   RetryMode,
   SessionInfo,
   SeriesOut,
+  RmsfOut,
   StructureSeriesOut,
   SystemPrepOut,
   SystemPrepRequest,
@@ -374,6 +375,10 @@ export function getJobSeries(id: string): Promise<SeriesOut> {
 
 export function getJobStructureSeries(id: string): Promise<StructureSeriesOut> {
   return request<StructureSeriesOut>(`/jobs/${encodeURIComponent(id)}/analysis/structure-series`);
+}
+
+export function getJobRmsf(id: string): Promise<RmsfOut> {
+  return request<RmsfOut>(`/jobs/${encodeURIComponent(id)}/analysis/rmsf`);
 }
 
 // ---------------------------------------------------------------------------

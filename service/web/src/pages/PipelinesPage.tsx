@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
+  Activity,
   AlertCircle,
   ArrowDown,
   ArrowUp,
@@ -33,7 +34,7 @@ import { Field } from "../components/ui/Form";
 import { ProgressBar } from "../components/ui/Progress";
 import { cn } from "../lib/utils";
 
-type NodeKind = "upload" | "system_prep" | "membrane" | "docking";
+type NodeKind = "upload" | "system_prep" | "membrane" | "docking" | "analysis";
 
 interface PipelineNode {
   id: string;
@@ -48,6 +49,8 @@ interface PipelineNode {
   boxPadding: number;
   // docking
   ligandFile: FileOut | null;
+  // analysis
+  jobId: string;
   exhaustiveness: number;
   numPoses: number;
   // runtime
@@ -58,6 +61,7 @@ interface PipelineNode {
 }
 
 const KIND_LABEL: Record<NodeKind, string> = {
+  analysis: "Analysis",
   upload: "Upload structure",
   system_prep: "System preparation",
   membrane: "Membrane embedding",
@@ -65,6 +69,7 @@ const KIND_LABEL: Record<NodeKind, string> = {
 };
 
 const KIND_ICON: Record<NodeKind, typeof FileUp> = {
+  analysis: Activity,
   upload: FileUp,
   system_prep: Layers,
   membrane: Shield,
@@ -81,6 +86,7 @@ function newNode(kind: NodeKind): PipelineNode {
     lipid: "POPC",
     boxPadding: 1.5,
     ligandFile: null,
+    jobId: "",
     exhaustiveness: 8,
     numPoses: 9,
     status: "idle",
@@ -230,6 +236,9 @@ export default function PipelinesPage() {
           lastFileId = job.output_file_ids[0];
           lastFileName = "docked_complex.pdb";
           setNodes((ns) => ns.map((n) => (n.id === node.id ? { ...n, status: "done", output: { fileId: lastFileId!, name: lastFileName } } : n)));
+        } else if (node.kind === "analysis") {
+          if (!node.jobId) throw new Error("No job ID provided");
+          setNodes((ns) => ns.map((n) => (n.id === node.id ? { ...n, status: "done", output: { fileId: node.jobId, name: "analysis" } } : n)));
         }
       } catch (e: any) {
         setNodes((ns) => ns.map((n) => (n.id === node.id ? { ...n, status: "failed", error: e?.message || "failed" } : n)));
@@ -353,6 +362,25 @@ export default function PipelinesPage() {
                         <input type="number" value={node.numPoses} onChange={(e) => update(node.id, { numPoses: Number(e.target.value) })} className="w-full rounded-md border border-line px-3 py-2 text-sm" />
                       </Field>
                     </div>
+                  </div>
+                )}
+
+                {node.kind === "analysis" && (
+                  <div className="space-y-2">
+                    <p className="text-[12px] text-muted">Analyze a completed simulation job. Enter the job ID.</p>
+                    <input
+                      type="text"
+                      value={node.jobId}
+                      onChange={(e) => update(node.id, { jobId: e.target.value })}
+                      className="w-full rounded-md border border-line px-3 py-2 text-sm"
+                      placeholder="job id"
+                      disabled={running}
+                    />
+                    {node.jobId && (
+                      <Button variant="ghost" size="sm" onClick={() => navigate(`/jobs/${node.jobId}`)}>
+                        Open job analysis
+                      </Button>
+                    )}
                   </div>
                 )}
 

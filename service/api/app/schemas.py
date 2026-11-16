@@ -755,6 +755,12 @@ class StructureSeriesOut(BaseModel):
     points: list[StructureSeriesPoint]
 
 
+class RmsfOut(BaseModel):
+    """Per-residue C-alpha RMSF for a completed stage."""
+
+    residues: dict[str, float]
+
+
 class LogOut(BaseModel):
     name: str
     relative_path: str

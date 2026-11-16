@@ -8,6 +8,7 @@ import {
   getJobEvents,
   getJobSeries,
   getJobStructureSeries,
+  getJobRmsf,
   getJobSpec,
   getJobViews,
   getLogs,
@@ -199,6 +200,15 @@ export function useJobStructureSeries(id: string | undefined, enabled = true) {
   return useQuery({
     queryKey: [...queryKeys.job(id ?? ""), "structure-series"] as const,
     queryFn: () => getJobStructureSeries(id as string),
+    enabled: Boolean(id) && enabled,
+    staleTime: 5 * 60_000,
+  });
+}
+
+export function useJobRmsf(id: string | undefined, enabled = true) {
+  return useQuery({
+    queryKey: [...queryKeys.job(id ?? ""), "rmsf"] as const,
+    queryFn: () => getJobRmsf(id as string),
     enabled: Boolean(id) && enabled,
     staleTime: 5 * 60_000,
   });
