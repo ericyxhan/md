@@ -16,16 +16,17 @@ import {
   getPrepJob,
   requestDocking,
 } from "../../lib/api";
-import { usePrepJob, useCapabilities } from "../../lib/queries";
+import { usePrepJob, usePrepJobs, useCapabilities } from "../../lib/queries";
 import { useToast } from "../../components/ui/Toast";
 import { PageHeader } from "../../components/layout/PageHeader";
 import { Button } from "../../components/ui/Button";
-import { Card, CardBody } from "../../components/ui/Card";
+import { Card, CardBody, CardHeader } from "../../components/ui/Card";
 import { EmptyState, PageLoader } from "../../components/ui/EmptyState";
 import { FileDropzone } from "../../components/upload/FileDropzone";
 import { Field } from "../../components/ui/Form";
 import { ProgressBar } from "../../components/ui/Progress";
 import { cn, isPrepActive } from "../../lib/utils";
+import { PrepJobRow } from "../../components/jobs/PrepJobCards";
 
 export default function DockingPage() {
   const { prepJobId } = useParams<{ prepJobId?: string }>();
@@ -45,6 +46,8 @@ function DockingForm() {
   const [formOpen, setFormOpen] = useState(true);
 
   const { data: capabilities } = useCapabilities();
+  const { data: prepJobs } = usePrepJobs();
+  const dockings = (prepJobs ?? []).filter((j) => j.type === "docking");
   const dockingEnabled = capabilities?.prep_workflows?.docking?.enabled ?? false;
 
   const [searchParams] = useSearchParams();
@@ -175,6 +178,36 @@ function DockingForm() {
           </Card>
         </form>
       )}
+
+      <Card className={formOpen ? "mt-6" : ""}>
+        <CardHeader
+          title="All docking runs"
+          description="Every docking job in this workspace, newest first."
+          action={
+            <Button variant="ghost" size="sm" onClick={() => queryClient.invalidateQueries({ queryKey: ["prep"] })}>
+              Refresh
+            </Button>
+          }
+        />
+        {dockings.length === 0 ? (
+          <EmptyState
+            icon={<Target className="size-5" />}
+            title="No docking runs yet"
+            description="Dock a ligand into a receptor, then use the top pose to launch simulations."
+            action={
+              <Button variant="primary" leadingIcon={<Plus className="size-4" />} onClick={() => setFormOpen(true)}>
+                New docking
+              </Button>
+            }
+          />
+        ) : (
+          <div className="divide-y divide-line">
+            {dockings.map((job) => (
+              <PrepJobRow key={job.id} job={job} />
+            ))}
+          </div>
+        )}
+      </Card>
     </div>
   );
 }
