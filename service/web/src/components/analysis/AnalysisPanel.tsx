@@ -2,6 +2,7 @@ import { Suspense, useMemo } from "react";
 import { Plus, RotateCcw, Thermometer, Droplets, Activity, Package } from "lucide-react";
 import {
   useJobSeries,
+  useJobStructureSeries,
   useJobViews,
 } from "../../lib/queries";
 import { formatCompact } from "../../lib/utils";
@@ -26,6 +27,7 @@ type AnalysisPanelProps = {
 export function AnalysisPanel({ jobId }: AnalysisPanelProps) {
   const views = useJobViews(jobId, true, false);
   const series = useJobSeries(jobId, true);
+  const structureSeries = useJobStructureSeries(jobId, true);
 
   if (views.isLoading || series.isLoading) {
     return (
@@ -167,6 +169,24 @@ export function AnalysisPanel({ jobId }: AnalysisPanelProps) {
           }
         />
       )}
+
+      {/* Structure analysis charts */}
+      {structureSeries.data ? (
+        <div className="grid gap-4 lg:grid-cols-2">
+          <ChartCard title="RMSD (backbone)" description="Backbone RMSD vs. frame 0 (nm).">
+            <SeriesChart points={structureSeries.data.points as any} column="rmsd_nm" unit="nm" />
+          </ChartCard>
+          <ChartCard title="Radius of gyration" description="Rg over frames (nm).">
+            <SeriesChart points={structureSeries.data.points as any} column="rg_nm" unit="nm" />
+          </ChartCard>
+          <ChartCard title="Hydrogen bonds" description="H-bond count per frame.">
+            <SeriesChart points={structureSeries.data.points as any} column="hbonds" />
+          </ChartCard>
+          <ChartCard title="Secondary structure" description="Helix fraction per frame.">
+            <SeriesChart points={structureSeries.data.points as any} column="helix_fraction" />
+          </ChartCard>
+        </div>
+      ) : null}
 
       {/* Trajectory player */}
       {stageView && stageView.structure && stageView.trajectory ? (

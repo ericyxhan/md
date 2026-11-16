@@ -724,6 +724,17 @@ class Worker:
                 )
         except Exception as exc:  # views are cosmetic; never fail a job
             self._job_log(claim, f"view generation failed: {exc}")
+        try:
+            from analysis import run_analysis
+            written = run_analysis(claim.job_root, lambda m: self._job_log(claim, m))
+            if written:
+                self._job_log(
+                    claim,
+                    "generated analysis: "
+                    + ", ".join(p.name for p in written),
+                )
+        except Exception as exc:  # analysis is cosmetic; never fail a job
+            self._job_log(claim, f"analysis generation failed: {exc}")
         artifacts = scan_artifacts(
             claim.job_root,
             claim.stage_names,

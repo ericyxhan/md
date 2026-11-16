@@ -733,6 +733,28 @@ class SeriesOut(BaseModel):
     points: list[SeriesPoint]
 
 
+class StructureSeriesPoint(BaseModel):
+    """One downsampled structure-analysis point from a stage's trajectory."""
+
+    frame: int
+    time_ps: float | None = None
+    rmsd_nm: float | None = None
+    rg_nm: float | None = None
+    hbonds: float | None = None
+    helix_fraction: float | None = None
+    sheet_fraction: float | None = None
+    sasa_nm2: float | None = None
+
+
+class StructureSeriesOut(BaseModel):
+    """Downsampled structure analysis for a completed stage."""
+
+    source_frames: int
+    view_frames: int
+    columns: list[str] = []
+    points: list[StructureSeriesPoint]
+
+
 class LogOut(BaseModel):
     name: str
     relative_path: str

@@ -9,7 +9,6 @@ import {
   Tooltip,
   Legend,
 } from "recharts";
-import type { SeriesPoint } from "../../lib/types";
 
 /**
  * Renders a single numeric series from a `SeriesOut.points` array as a line
@@ -17,8 +16,8 @@ import type { SeriesPoint } from "../../lib/types";
  * "temperature_k", "potential_energy_kj_mol", "density_g_ml").
  */
 export interface SeriesChartProps {
-  points: SeriesPoint[];
-  column: keyof SeriesPoint;
+  points: any[];
+  column: string;
   unit?: string;
   height?: number;
 }

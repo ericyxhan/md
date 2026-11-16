@@ -7,6 +7,7 @@ import {
   getJobConfig,
   getJobEvents,
   getJobSeries,
+  getJobStructureSeries,
   getJobSpec,
   getJobViews,
   getLogs,
@@ -189,6 +190,15 @@ export function useJobSeries(id: string | undefined, enabled = true) {
   return useQuery({
     queryKey: queryKeys.series(id ?? ""),
     queryFn: () => getJobSeries(id as string),
+    enabled: Boolean(id) && enabled,
+    staleTime: 5 * 60_000,
+  });
+}
+
+export function useJobStructureSeries(id: string | undefined, enabled = true) {
+  return useQuery({
+    queryKey: [...queryKeys.job(id ?? ""), "structure-series"] as const,
+    queryFn: () => getJobStructureSeries(id as string),
     enabled: Boolean(id) && enabled,
     staleTime: 5 * 60_000,
   });

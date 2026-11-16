@@ -26,6 +26,8 @@ from ..schemas import (
     LogTailOut,
     RetryRequest,
     SeriesOut,
+    StructureSeriesOut,
+    StructureSeriesPoint,
     ViewFileOut,
     ViewListOut,
     ViewOut,
@@ -380,6 +382,62 @@ def get_job_series(
         columns=columns,
         points=points,
     )
+
+
+
+@router.get("/{job_id}/analysis/structure-series", response_model=StructureSeriesOut)
+def get_job_structure_series(
+    request: Request,
+    job_id: str,
+    owner: str = Depends(require_owner),
+    session: Session = Depends(get_session),
+) -> StructureSeriesOut:
+    """Downsampled structure analysis from a stage's trajectory."""
+
+    job = get_owned_job(session, owner, job_id)
+    storage = request.app.state.storage
+
+    artifacts = list_artifacts(session, job, kind="analysis")
+    candidates = [
+        item for item in artifacts
+        if item.relative_path.endswith("outputs/analysis/structure_series.json")
+    ]
+    if not candidates:
+        raise APIError(
+            404,
+            "structure_series_not_found",
+            "No structure analysis is available for this job.",
+        )
+
+    artifact = candidates[0]
+    path = artifact_path(storage, job, artifact)
+    if not path.is_file():
+        raise APIError(
+            404,
+            "structure_series_not_found",
+            "Structure analysis file is unavailable.",
+        )
+
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise APIError(
+            500,
+            "structure_series_read_failed",
+            f"Could not read structure analysis: {exc}",
+        ) from exc
+
+    points = []
+    for raw in data.get("points", []):
+        points.append(StructureSeriesPoint(**{k: v for k, v in raw.items() if k in StructureSeriesPoint.model_fields}))
+
+    return StructureSeriesOut(
+        source_frames=data.get("source_frames", 0),
+        view_frames=data.get("view_frames", 0),
+        columns=data.get("columns", []),
+        points=points,
+    )
+
 
 
 @router.get("/{job_id}/artifacts", response_model=ArtifactListOut)

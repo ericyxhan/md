@@ -26,6 +26,7 @@ import type {
   RetryMode,
   SessionInfo,
   SeriesOut,
+  StructureSeriesOut,
   SystemPrepOut,
   SystemPrepRequest,
   UserInfo,
@@ -369,6 +370,10 @@ export function getJobViews(id: string): Promise<ViewList> {
 
 export function getJobSeries(id: string): Promise<SeriesOut> {
   return request<SeriesOut>(`/jobs/${encodeURIComponent(id)}/analysis/series`);
+}
+
+export function getJobStructureSeries(id: string): Promise<StructureSeriesOut> {
+  return request<StructureSeriesOut>(`/jobs/${encodeURIComponent(id)}/analysis/structure-series`);
 }
 
 // ---------------------------------------------------------------------------

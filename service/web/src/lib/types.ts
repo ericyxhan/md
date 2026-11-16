@@ -382,6 +382,24 @@ export interface SeriesOut {
   points: SeriesPoint[];
 }
 
+export interface StructureSeriesPoint {
+  frame: number;
+  time_ps?: number | null;
+  rmsd_nm?: number | null;
+  rg_nm?: number | null;
+  hbonds?: number | null;
+  helix_fraction?: number | null;
+  sheet_fraction?: number | null;
+  sasa_nm2?: number | null;
+}
+
+export interface StructureSeriesOut {
+  source_frames: number;
+  view_frames: number;
+  columns: string[];
+  points: StructureSeriesPoint[];
+}
+
 
 export interface JobPlan {
   valid: boolean;
