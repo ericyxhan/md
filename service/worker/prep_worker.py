@@ -272,6 +272,7 @@ class ClaimedPrepJob:
     # Membrane-embed fields (set for type == "membrane_embed")
     protein_file_id: str | None = None
     lipid: str | None = None
+    lipid_composition: str | None = None
     box_padding_nm: float | None = None
     orientation: str | None = None
     ionic_strength_molar: float | None = None
@@ -444,7 +445,7 @@ class PrepWorker:
         cmd = [
             self.config.packmol_path,
             "--pdb", str(local_pdb),
-            "--lipids", str(claim.lipid),
+            "--lipids", str(claim.lipid_composition or claim.lipid),
             "--output", str(claim.output_pdb),
             "--dist", str(int(claim.box_padding_nm * 10)),  # nm -> Angstroms
             "--salt",
@@ -1312,6 +1313,7 @@ class PrepWorker:
             job_type=job_type or "membrane_embed",
             protein_file_id=protein_file_id,
             lipid=lipid,
+            lipid_composition=data.get("lipid_composition"),
             box_padding_nm=float(data.get("box_padding_nm", 1.5)),
             orientation=data.get("orientation"),
             ionic_strength_molar=float(data.get("ionic_strength_molar", 0.15)),

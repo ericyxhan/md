@@ -71,6 +71,7 @@ def request_membrane_embed(
                 {
                     "protein_file_id": body.protein_file_id,
                     "lipid": body.lipid,
+                    "lipid_composition": body.lipid_composition,
                     "box_padding_nm": body.box_padding_nm,
                     "orientation": body.orientation,
                     "ionic_strength_molar": body.ionic_strength_molar,
@@ -98,6 +99,7 @@ def request_membrane_embed(
             owner=owner,
             protein_file_id=body.protein_file_id,
             lipid=body.lipid,
+            lipid_composition=body.lipid_composition,
             box_padding_nm=body.box_padding_nm,
             orientation=body.orientation,
             ionic_strength_molar=body.ionic_strength_molar,

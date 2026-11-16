@@ -375,6 +375,7 @@ function MembraneEmbedForm() {
   const [proteinFile, setProteinFile] = useState<FileOut | null>(null);
   const [pdbId, setPdbId] = useState("");
   const [lipid, setLipid] = useState<LipidType>("POPC");
+  const [lipidComposition, setLipidComposition] = useState("");
   const [boxPadding, setBoxPadding] = useState(1.5);
   const [orientation, setOrientation] = useState<string | null>(null);
   const [ionicStrength, setIonicStrength] = useState(0.15);
@@ -458,6 +459,7 @@ function MembraneEmbedForm() {
     embedMutation.mutate({
       protein_file_id: proteinFile.id,
       lipid,
+      lipid_composition: lipidComposition.trim() || null,
       box_padding_nm: boxPadding,
       orientation,
       ionic_strength_molar: ionicStrength,
@@ -650,6 +652,22 @@ function MembraneEmbedForm() {
                         </option>
                       ))}
                     </Select>
+                  </Field>
+
+                  <Field
+                    label="Lipid composition (advanced)"
+                    htmlFor="membrane-composition"
+                    hint="Optional mixed-lipid spec in packmol-memgen syntax, e.g. POPC:POPE. Overrides the single lipid above."
+                  >
+                    <input
+                      id="membrane-composition"
+                      type="text"
+                      value={lipidComposition}
+                      onChange={(event) => setLipidComposition(event.target.value)}
+                      disabled={isEmbedding}
+                      className="w-full rounded-md border border-line px-3 py-2 text-sm"
+                      placeholder="POPC:POPE"
+                    />
                   </Field>
 
                   <Field

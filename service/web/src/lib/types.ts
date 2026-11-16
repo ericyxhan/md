@@ -546,6 +546,7 @@ export type LipidType =
 export interface MembraneEmbedRequest {
   protein_file_id: string;
   lipid: LipidType;
+  lipid_composition?: string | null;
   box_padding_nm: number;
   orientation?: string | null;
   ionic_strength_molar: number;

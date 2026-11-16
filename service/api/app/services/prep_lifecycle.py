@@ -132,6 +132,7 @@ def claim_prep(
                 {
                     "protein_file_id": request["protein_file_id"],
                     "lipid": request["lipid"],
+                    "lipid_composition": request.get("lipid_composition"),
                     "box_padding_nm": request["box_padding_nm"],
                     "orientation": request.get("orientation"),
                     "ionic_strength_molar": request["ionic_strength_molar"],

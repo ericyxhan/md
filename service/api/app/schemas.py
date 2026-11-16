@@ -809,6 +809,14 @@ class MembraneEmbedRequest(StrictModel):
         description="Uploaded protein complex (PDB or mmCIF) file ID",
     )
     lipid: LipidType = Field(default="POPC")
+    lipid_composition: str | None = Field(
+        default=None,
+        max_length=200,
+        description=(
+            "Optional multi-lipid composition in packmol-memgen syntax, "
+            "e.g. 'POPC:POPE' or 'POPC:POPE//DPPC'. Overrides `lipid` when set."
+        ),
+    )
     box_padding_nm: float = Field(
         default=1.5, ge=0.5, le=5.0,
         description="Padding around the protein in the membrane box (nm)",

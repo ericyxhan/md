@@ -219,6 +219,7 @@ def queue_membrane_embed(
     owner: str,
     protein_file_id: str,
     lipid: str,
+    lipid_composition: str | None = None,
     box_padding_nm: float,
     orientation: str | None,
     ionic_strength_molar: float,

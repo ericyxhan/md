@@ -165,6 +165,7 @@ class PrepClaimResponse(InternalModel):
     # Membrane-embed fields
     protein_file_id: str | None = None
     lipid: str | None = None
+    lipid_composition: str | None = None
     box_padding_nm: float | None = None
     orientation: str | None = None
     ionic_strength_molar: float | None = None

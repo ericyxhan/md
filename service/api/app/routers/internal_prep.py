@@ -169,6 +169,7 @@ def claim(
         job_type=job_type,
         protein_file_id=result.protein_file_id,
         lipid=result.lipid,
+        lipid_composition=result.lipid_composition,
         box_padding_nm=result.box_padding_nm,
         orientation=result.orientation,
         ionic_strength_molar=result.ionic_strength_molar,
