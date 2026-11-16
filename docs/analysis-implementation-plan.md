@@ -97,3 +97,83 @@ Already partially possible via artifact downloads; document it.
 - Do not block simulation completion on analysis: run analysis as a
   post-finalize step and report it as a separate artifact; failure leaves the
   run `completed`.
+
+## Full catalog of trajectory analyses a lab user may want
+
+Grouped by category. "Cost" = relative compute on a solute-focused view
+(~18k atoms, 50 frames). "Lib" = recommended library.
+
+### A. Thermodynamic / state (already have, from simulation.log)
+- Temperature (K) — have
+- Pressure / volume — have (volume)
+- Potential, kinetic, total energy — have (PE, KE)
+- Density — have
+- Speed (ns/day), elapsed time — have (speed, elapsed_s)
+- Step / time axis — have
+
+### B. Global structure stability
+- RMSD vs. starting frame (backbone / all-atom / ligand) — **A2**
+- RMSD vs. reference (crystal) structure — A2 (needs reference upload)
+- RMSD matrix / pairwise RMSD across frames — A3
+- Radius of gyration (Rg) over time — **A2**
+- End-to-end distance, asphericity, eccentricity — A3
+- RMSF (per-residue Cα fluctuation) — A3 (needs all frames in memory)
+- B-factor comparison (simulated vs. crystal) — A3
+
+### C. Ligand-specific
+- Ligand RMSD vs. docked/crystal pose — A2 (single-frame compare)
+- Ligand RMSD vs. starting pose over time — A2
+- Binding-site (pocket) RMSD — A2
+- Ligand torsion angle time series — A3 (RDKit)
+- Ligand-protein contacts over time — A3
+- Ligand RMSF / atomic fluctuations — A3
+
+### D. Interactions
+- Hydrogen bonds: count over time, occupancy per donor-acceptor pair — A3 (MDTraj)
+- Salt bridges / ionic contacts — A3
+- Hydrophobic contacts — A3
+- π-π / π-cation interactions — A3
+- Water bridges — A3 (heavy)
+- Contact map (residue-residue) — A3
+
+### E. Protein structure
+- Secondary structure (DSSP) time series — A3 (MDTraj)
+- Secondary-structure content (% helix/sheet/coil) over time — A3
+- Ramachandran (φ/ψ) distributions — A3
+- Per-residue solvent-accessible surface area (SASA) — A3
+- Solvent-accessible surface area (total) over time — A3
+
+### F. Dynamics / advanced
+- PCA / essential dynamics (eigenvectors, projections) — A3+ (MDAnalysis)
+- Free-energy landscape (PCA-based) — A3+
+- Clustering of frames (RMSD-based) — A3+
+- Diffusion / MSD — A3+
+- Autocorrelation of velocities — A3+
+
+### G. Energetics (beyond state reporter)
+- Interaction energy (protein-ligand) over time — A3 (re-evaluate with OpenMM)
+- Per-residue energy decomposition — A3+ (heavy)
+
+### H. Export / downstream
+- Download series.json, structure_series.json
+- Download derived views (PDB + DCD) — already
+- Export to CSV for custom analysis — trivial addition
+- Notebook-friendly (HDF5/NetCDF) — future
+
+## Prioritized roadmap
+
+1. **A2 (now):** RMSD (backbone + ligand) and Rg time series + charts.
+   Cheap, high-value, no new deps.
+2. **A3 (next):** RMSF, H-bond count/occupancy, secondary-structure
+   content, SASA. Requires MDTraj in an on-demand analysis worker.
+3. **A3 (later):** contact maps, clustering, PCA/free-energy landscape.
+4. **A4:** export formats and documentation.
+
+## Notes on scope
+
+- Compute on the *solute view* (solvent removed) so metrics are meaningful and
+  cheap; keep the full system available for download for users who need it.
+- Cap frame counts for memory-heavy metrics (RMSF over all frames) and gate
+  behind a flag.
+- Analysis must never block or fail a simulation run; report as separate
+  artifacts with their own status.
