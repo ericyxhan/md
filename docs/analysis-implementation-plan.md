@@ -40,6 +40,25 @@ worker's series writer the running min/max/mean of each, plus a derived
 "equilibration indicator" (e.g., rolling std of temperature). Add charts for
 KE and speed (done). Add a "Time" x-axis toggle.
 
+## Tooling recommendation
+
+| Tool | Verdict | Why |
+|---|---|---|
+| **MDTraj** | **Primary choice for A3** | Pure-Python + C extensions, reads DCD/PDB natively, first-class RMSD/RMSF/Rg/H-bonds/DSSP/contacts. ~100 MB. Clean API (`md.load`, `md.rmsd`, `md.compute_rg`). Best fit for our DCD + PDB-topology pipeline. |
+| **MDAnalysis** | Optional, for advanced users | More powerful (atom selections, PCA, custom analysis) but heavier and a steeper API. Keep as an opt-in extra, not a core dep. |
+| **RDKit** | Keep for small-molecule work | Great for ligand RMSD vs. crystal pose, torsions, conformer analysis. Already in the param env. Not a trajectory-analysis tool — don't use it for protein RMSD/Rg. |
+| **PyTraj / cpptraj** | Skip | Amber-centric; pulls in AmberTools. We're OpenMM-based. |
+| **OpenMM** | Already have it | Energy re-evaluation on frames is possible, but structural metrics are not its job. |
+
+**Phased dependency strategy (keeps the worker image lean):**
+
+- **A2 (lightweight, no new deps):** implement RMSD and Rg in pure Python using
+  a minimal DCD reader + NumPy (already in the image). Enough for the 80% case
+  and adds zero image weight.
+- **A3 (heavy):** add MDTraj as an optional dependency of a separate
+  `analysis-worker` (or an extra in the prep/sim image), invoked on demand.
+  Never block simulation completion on it.
+
 ### Phase A2 — lightweight structural metrics in the worker
 Use RDKit (already in the param env) or a small pure-Python trajectory
 reader to compute, per frame, on the *solute view* (already derived):
