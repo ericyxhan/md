@@ -14,7 +14,6 @@ import {
   getPrepJob,
   listPrepJobs,
   listJobs,
-  createWorkflow,
   listWorkflows,
   getWorkflow,
   getEvents,
@@ -24,11 +23,9 @@ import {
 } from "./api";
 import { isActive, isTerminal } from "./utils";
 import type {
-  FileInspect,
   Job,
   JobEvent,
   PrepJobStatus,
-  SeriesOut,
 } from "./types";
 
 export const queryKeys = {

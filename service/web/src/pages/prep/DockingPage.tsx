@@ -1,15 +1,13 @@
-import { useCallback, useEffect, useState, type ChangeEvent } from "react";
+import { useEffect, useState, type ChangeEvent } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircle,
   Download,
-  FileUp,
-  Loader2,
   Plus,
   Target,
 } from "lucide-react";
-import type { DockingOut, FileOut, PrepJobStatus } from "../../lib/types";
+import type { DockingOut, FileOut } from "../../lib/types";
 import {
   cancelPrepJob,
   getFile,

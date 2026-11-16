@@ -1,4 +1,5 @@
 import { useNavigate } from "react-router-dom";
+import React from "react";
 import { ChevronRight } from "lucide-react";
 import type { PrepJobStatus } from "../../lib/types";
 import { formatRelative } from "../../lib/utils";
@@ -10,10 +11,14 @@ import { ProgressBar } from "../ui/Progress";
  * the two workspaces read the same way: history first, one row per job, with
  * live progress for anything still running.
  */
-export function PrepJobRow({ job }: { job: PrepJobStatus }) {
+export const PrepJobRow = React.memo(function PrepJobRow({ job }: { job: PrepJobStatus }) {
   const navigate = useNavigate();
   const base =
-    job.type === "membrane_embed" ? "/prep/membrane" : "/prep/system-prep";
+    job.type === "membrane_embed"
+      ? "/prep/membrane"
+      : job.type === "docking"
+        ? "/prep/docking"
+        : "/prep/system-prep";
   const active =
     job.status === "queued" ||
     job.status === "claimed" ||
@@ -65,4 +70,4 @@ export function PrepJobRow({ job }: { job: PrepJobStatus }) {
       <ChevronRight className="size-3.5 shrink-0 text-faint transition group-hover:text-brand-600" />
     </button>
   );
-}
+})

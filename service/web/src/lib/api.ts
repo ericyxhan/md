@@ -22,7 +22,6 @@ import type {
   DockingRequest,
   MembraneEmbedOut,
   MembraneEmbedRequest,
-  PDBInspection,
   PrepJobStatus,
   RetryMode,
   SessionInfo,
@@ -33,7 +32,6 @@ import type {
   ViewList,
   WorkflowCreate,
   WorkflowDetailOut,
-  WorkflowJobSummary,
   WorkflowOut,
   WorkflowVariantsRequest,
 } from "./types";
