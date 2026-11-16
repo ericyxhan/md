@@ -31,7 +31,6 @@ tracking file IDs by hand. Nodes are MolDy operations; edges carry file IDs.
 | Membrane Embed | `/prep/membrane` | file_id | embedded PDB + PSF |
 | Docking | `/prep/docking` | receptor + ligand(s) | docked complex PDB |
 | Simulation | `/jobs` (MD) | complex file_id | trajectory, states, logs |
-| Analysis | views/series/structure-series | job_id | RMSD, Rg, H-bonds, RMSF, DSSP, SASA charts |
 
 Edges are typed by file kind so the canvas rejects nonsensical connections.
 
