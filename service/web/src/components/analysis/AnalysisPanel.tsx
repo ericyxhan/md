@@ -136,6 +136,21 @@ export function AnalysisPanel({ jobId }: AnalysisPanelProps) {
             />
           </ChartCard>
           <ChartCard
+            title="Kinetic Energy"
+            description="Kinetic energy vs. simulation step (kJ/mol)."
+          >
+            <SeriesChart
+              points={series.data.points}
+              column="kinetic_energy_kj_mol"
+            />
+          </ChartCard>
+          <ChartCard
+            title="Speed"
+            description="Simulation throughput vs. step (ns/day)."
+          >
+            <SeriesChart points={series.data.points} column="speed_ns_day" unit="ns/day" />
+          </ChartCard>
+          <ChartCard
             title="Box Volume"
             description="Simulation box volume vs. simulation step (nm³)."
           >
