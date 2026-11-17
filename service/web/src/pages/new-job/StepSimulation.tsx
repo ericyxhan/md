@@ -341,6 +341,11 @@ export function StepSimulation({
                 <p className="mt-1.5 text-[11.5px] leading-relaxed text-muted">
                   {preset.description}
                 </p>
+                {"runtimeHint" in preset && preset.runtimeHint ? (
+                  <p className="mt-2 text-[10.5px] leading-relaxed text-faint">
+                    {preset.runtimeHint}
+                  </p>
+                ) : null}
               </button>
             );
           })}

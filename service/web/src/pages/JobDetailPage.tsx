@@ -19,6 +19,7 @@ import {
   ScrollText,
   Terminal,
   Thermometer,
+  HelpCircle,
 } from "lucide-react";
 import type { Job, JobEvent, RetryMode, ViewManifest } from "../lib/types";
 import { ApiError, cancelJob, retryJob } from "../lib/api";
@@ -33,6 +34,7 @@ import {
 } from "../lib/queries";
 import { useJobStream } from "../lib/useJobStream";
 import { useToast } from "../components/ui/Toast";
+import { classifyJobError } from "../lib/errorHints";
 import { AnalysisPanel } from "../components/analysis/AnalysisPanel";
 import { LazyStructureViewport } from "../components/viewer/lazy";
 import { Button } from "../components/ui/Button";
@@ -276,7 +278,7 @@ function ProgressPanel({ job }: { job: Job }) {
             {job.current_stage
               ? humanizeStage(job.current_stage)
               : job.status === "queued"
-                ? `Waiting for the worker · position ${job.queue_position ?? "—"}`
+                ? `Queued — waiting for a GPU worker${job.queue_position != null ? ` (position ${job.queue_position} in queue)` : ""}. Runtime depends on system size and GPU availability.`
                 : job.status === "completed"
                   ? "All stages finished"
                   : "Awaiting stage report"}
@@ -344,11 +346,16 @@ function ConfigurationPanel({ jobId }: { jobId: string }) {
 
   return (
     <div>
+      <div className="px-4 pt-3 pb-1">
+        <p className="text-[11px] text-muted">
+          Advanced (for debugging/reproducibility). Most users don’t need to edit these.
+        </p>
+      </div>
       <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-2.5">
         <div className="flex gap-1">
           {(
             [
-              { id: "toml" as const, label: "config.toml" },
+              { id: "toml" as const, label: "config.toml (advanced)" },
               { id: "spec" as const, label: "Resolved spec" },
             ]
           ).map((item) => (
@@ -520,6 +527,16 @@ export function JobDetailPage() {
         </div>
 
         <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <a
+            href="https://github.com/ericyxhan/md/blob/main/docs/START_HERE.md"
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1.5 text-[11.5px] font-medium text-muted hover:bg-ink/5 hover:text-ink"
+            title="Open troubleshooting & deploy guide (START_HERE.md)"
+          >
+            <HelpCircle className="size-3.5" />
+            Help
+          </a>
           <Button
             variant="secondary"
             size="sm"
@@ -555,19 +572,47 @@ export function JobDetailPage() {
         </div>
       </div>
 
-      {job.error ? (
-        <div className="mt-4 flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3">
-          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-rose-600" />
-          <div className="min-w-0">
-            <p className="text-[12.5px] font-semibold text-rose-800">
-              {titleCase(job.error.code)}
-            </p>
-            <p className="mt-0.5 text-[12px] leading-relaxed text-rose-700">
-              {job.error.message}
-            </p>
+      {job.error ? (() => {
+        const hint = classifyJobError(job.error.code, job.error.message);
+        return (
+          <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="mt-0.5 size-4 shrink-0 text-rose-600" />
+              <div className="min-w-0 flex-1">
+                <p className="text-[12.5px] font-semibold text-rose-800">
+                  What went wrong: {hint?.title ?? titleCase(job.error.code)}
+                </p>
+                <p className="mt-0.5 text-[12px] leading-relaxed text-rose-700">
+                  {job.error.message}
+                </p>
+                {hint ? (
+                  <div className="mt-3 space-y-2 text-[11.5px] leading-relaxed text-rose-900">
+                    <div>
+                      <span className="font-semibold">Likely causes:</span>
+                      <ul className="mt-1 list-disc pl-5 space-y-0.5">
+                        {hint.likelyCauses.map((c, i) => (
+                          <li key={i}>{c}</li>
+                        ))}
+                      </ul>
+                    </div>
+                    <div>
+                      <span className="font-semibold">Suggested fixes:</span>
+                      <ul className="mt-1 list-disc pl-5 space-y-0.5">
+                        {hint.fixes.map((f, i) => (
+                          <li key={i}>{f}</li>
+                        ))}
+                      </ul>
+                    </div>
+                    <p className="text-[11px] text-rose-700/90">
+                      Tip: open the <span className="font-medium">Logs</span> tab and search for “ERROR” or the last traceback.
+                    </p>
+                  </div>
+                ) : null}
+              </div>
+            </div>
           </div>
-        </div>
-      ) : null}
+        );
+      })() : null}
 
       {job.status === "canceling" ? (
         <div className="mt-4 flex items-center gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[12.5px] text-amber-900">
@@ -579,8 +624,7 @@ export function JobDetailPage() {
       {job.status === "queued" ? (
         <div className="mt-4 flex items-center gap-2.5 rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 text-[12.5px] text-violet-900">
           <CircleDot className="size-4 text-violet-600" />
-          Queued{job.queue_position ? ` at position ${job.queue_position}` : ""}.
-          The GPU worker claims runs oldest first.
+          Queued{job.queue_position != null ? ` (position ${job.queue_position} in queue)` : ""} — waiting for a GPU worker. The GPU worker claims runs oldest first; runtime varies by system size and hardware.
         </div>
       ) : null}
 

@@ -80,6 +80,7 @@ export const PRESETS: Array<{
   name: string;
   tagline: string;
   description: string;
+  runtimeHint?: string;
   equilibration: Array<Partial<StageDraft> & { durationNs: number }>;
   productionEnabled: boolean;
   productionNs: number;
@@ -87,9 +88,10 @@ export const PRESETS: Array<{
   {
     id: "quick",
     name: "Quick check",
-    tagline: "~1 minute",
+    tagline: "Smoke test",
     description:
-      "A short smoke test that confirms preparation and the GPU worker are healthy.",
+      "A short run to confirm setup and the GPU worker are healthy. No production sampling.",
+    runtimeHint: "Often a few minutes on a typical GPU (varies by system size).",
     equilibration: [
       {
         durationNs: 0.02,
@@ -103,9 +105,10 @@ export const PRESETS: Array<{
   {
     id: "standard",
     name: "Standard run",
-    tagline: "Balanced",
+    tagline: "Balanced (default)",
     description:
-      "Two equilibration phases followed by 10 ns of production. A good default for most systems.",
+      "Two equilibration phases followed by 10 ns of production. A good starting point for many systems.",
+    runtimeHint: "Often hours on a mid-range GPU; larger systems take longer. Queue time depends on shared GPU availability.",
     equilibration: [
       { durationNs: 0.1, label: "NVT equilibration", barostat: false },
       { durationNs: 0.1, label: "NPT equilibration", barostat: true },
@@ -115,10 +118,11 @@ export const PRESETS: Array<{
   },
   {
     id: "production",
-    name: "Production",
-    tagline: "Long sampling",
+    name: "Long production",
+    tagline: "Extended sampling",
     description:
-      "A longer NPT production run for analysis. Expect hours depending on system size and GPU.",
+      "Longer NPT production for analysis. Use when you need more conformational sampling.",
+    runtimeHint: "Often many hours to days depending on system size and GPU. Plan for queue waits on shared hardware.",
     equilibration: [
       { durationNs: 0.5, label: "NPT equilibration", barostat: true },
     ],

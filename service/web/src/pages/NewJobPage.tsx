@@ -208,7 +208,7 @@ function RunSummary({ draft }: { draft: Draft }) {
           </p>
           <p className="mt-1 text-[10.5px] leading-relaxed text-brand-900/70">
             The job is validated, queued, and claimed by the GPU worker. Progress
-            streams live to the job page.
+            streams live to the job page. Runtime and queue time vary by system size, GPU, and current load.
           </p>
         </div>
       </div>

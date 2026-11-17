@@ -6,6 +6,7 @@ import {
   ChevronRight,
   FlaskConical,
   Gauge,
+  HelpCircle,
   Layers,
   Layout,
   LogOut,
@@ -264,9 +265,22 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
             <LogOut className="size-4" />
           </button>
         </div>
-        <div className="mt-1 flex items-center gap-2 px-2 py-1 text-[10.5px] text-faint">
-          <Settings className="size-3" />
-          API v1 · OpenMM
+        <div className="mt-1 flex items-center justify-between gap-2 px-2 py-1 text-[10.5px] text-faint">
+          <a
+            href="https://github.com/ericyxhan/md/blob/main/docs/START_HERE.md"
+            target="_blank"
+            rel="noreferrer"
+            onClick={onNavigate}
+            className="flex items-center gap-1.5 rounded px-1 py-0.5 font-medium text-muted transition hover:bg-ink/5 hover:text-ink"
+            title="Open the help and troubleshooting guide (START_HERE.md)"
+          >
+            <HelpCircle className="size-3" />
+            Help &amp; docs
+          </a>
+          <span className="flex items-center gap-1.5">
+            <Settings className="size-3" />
+            API v1
+          </span>
         </div>
       </div>
     </div>
