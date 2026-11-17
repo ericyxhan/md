@@ -36,20 +36,20 @@ function DockingForm() {
   const navigate = useNavigate();
   const { push } = useToast();
   const queryClient = useQueryClient();
+  const [searchParams] = useSearchParams();
+  const prepFileId = searchParams.get("prepFileId");
   const [receptorFile, setReceptorFile] = useState<FileOut | null>(null);
   const [ligandFile, setLigandFile] = useState<FileOut | null>(null);
   const [ligandSmiles, setLigandSmiles] = useState("");
   const [exhaustiveness, setExhaustiveness] = useState(8);
   const [numPoses, setNumPoses] = useState(9);
-  const [formOpen, setFormOpen] = useState(true);
+  const [formOpen, setFormOpen] = useState(Boolean(prepFileId));
 
   const { data: capabilities } = useCapabilities();
   const { data: prepJobs } = usePrepJobs();
   const dockings = (prepJobs ?? []).filter((j) => j.type === "docking");
   const dockingEnabled = capabilities?.prep_workflows?.docking?.enabled ?? false;
 
-  const [searchParams] = useSearchParams();
-  const prepFileId = searchParams.get("prepFileId");
   useEffect(() => {
     if (!prepFileId || receptorFile) return;
     getFile(prepFileId)
