@@ -48,7 +48,10 @@ export function EventFeed({
       {events.map((event, index) => {
         const { Icon, className: iconClass } = eventIcon(event.type);
         return (
-          <li key={event.id} className="relative flex gap-3 pb-4 last:pb-0">
+          <li
+            key={event.id}
+            className="relative flex gap-3 pb-4 last:pb-0 animate-slide-in"
+          >
             {index < events.length - 1 ? (
               <span className="absolute left-[13px] top-7 h-[calc(100%-16px)] w-px bg-line" />
             ) : null}

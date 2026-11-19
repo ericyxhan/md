@@ -430,39 +430,41 @@ function Wizard({
             </div>
 
             <CardBody className="px-5 py-5">
-              {step === 0 ? (
-                <StepStructure
-                  draft={draft}
-                  onChange={update}
-                  capabilities={capabilities}
-                />
-              ) : null}
-              {step === 1 ? (
-                <StepSystem
-                  draft={draft}
-                  onChange={update}
-                  capabilities={capabilities}
-                />
-              ) : null}
-              {step === 2 ? (
-                <StepSimulation
-                  draft={draft}
-                  onChange={update}
-                  capabilities={capabilities}
-                />
-              ) : null}
-              {step === 3 ? (
-                <StepReview
-                  draft={draft}
-                  capabilities={capabilities}
-                  plan={plan}
-                  planPending={validateMutation.isPending}
-                  planError={planError}
-                  planErrorDetails={planErrorDetails}
-                  onValidate={runValidation}
-                  submitError={submitError}
-                />
-              ) : null}
+              <div key={step} className="animate-fade-up">
+                {step === 0 ? (
+                  <StepStructure
+                    draft={draft}
+                    onChange={update}
+                    capabilities={capabilities}
+                  />
+                ) : null}
+                {step === 1 ? (
+                  <StepSystem
+                    draft={draft}
+                    onChange={update}
+                    capabilities={capabilities}
+                  />
+                ) : null}
+                {step === 2 ? (
+                  <StepSimulation
+                    draft={draft}
+                    onChange={update}
+                    capabilities={capabilities}
+                  />
+                ) : null}
+                {step === 3 ? (
+                  <StepReview
+                    draft={draft}
+                    capabilities={capabilities}
+                    plan={plan}
+                    planPending={validateMutation.isPending}
+                    planError={planError}
+                    planErrorDetails={planErrorDetails}
+                    onValidate={runValidation}
+                    submitError={submitError}
+                  />
+                ) : null}
+              </div>
             </CardBody>
 
             <div className="flex flex-col gap-3 border-t border-line bg-surface-muted/40 px-5 py-3.5 sm:flex-row sm:items-center sm:justify-between">

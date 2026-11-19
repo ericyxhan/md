@@ -321,7 +321,7 @@ export function StepSimulation({
                 type="button"
                 onClick={() => onChange(applyPreset(draft, preset.id))}
                 className={cn(
-                  "relative rounded-xl border p-3.5 text-left transition",
+                  "relative rounded-xl border p-3.5 text-left transition duration-150 hover:-translate-y-0.5 active:scale-[0.99]",
                   active
                     ? "border-brand-400 bg-brand-50/55 ring-1 ring-brand-300"
                     : "border-line bg-surface hover:border-brand-200 hover:bg-brand-50/20",

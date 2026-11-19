@@ -124,10 +124,88 @@
   animation: soft-pulse 1.8s ease-in-out infinite;
 }
 
+@keyframes slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-slide-in {
+  animation: slide-in 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* A moving highlight that makes active progress read as "still working". */
+@keyframes shimmer {
+  from {
+    transform: translateX(-120%);
+  }
+  to {
+    transform: translateX(320%);
+  }
+}
+
+.progress-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+
+.progress-shimmer::after {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: 35%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgb(255 255 255 / 55%),
+    transparent
+  );
+  animation: shimmer 1.6s ease-in-out infinite;
+}
+
+/* Flowing connector between stages while a job is running. */
+@keyframes flow {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 0 200%;
+  }
+}
+
+.connector-flow {
+  background-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    #17a394 50%,
+    transparent 100%
+  );
+  background-size: 100% 200%;
+  animation: flow 1.8s linear infinite;
+}
+
 /* Thin progress indicator used on cards and tables. */
 .progress-track {
   @apply h-1.5 w-full overflow-hidden rounded-full bg-line;
 }
 .progress-fill {
   @apply h-full rounded-full bg-brand-500 transition-[width] duration-700 ease-out;
+}
+
+/* Respect the OS-level "reduce motion" setting everywhere in the app. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

@@ -72,9 +72,11 @@ export function StageTimeline({
               <span
                 className={cn(
                   "absolute left-[7.5px] top-5 h-[calc(100%-12px)] w-px",
-                  stage.status === "completed"
-                    ? "bg-emerald-200"
-                    : "bg-line",
+                  active
+                    ? "connector-flow"
+                    : stage.status === "completed"
+                      ? "bg-emerald-200"
+                      : "bg-line",
                 )}
               />
             ) : null}
@@ -119,7 +121,8 @@ export function StageTimeline({
                   <div className="h-1 flex-1 overflow-hidden rounded-full bg-line">
                     <div
                       className={cn(
-                        "h-full rounded-full transition-[width] duration-700",
+                        "relative h-full rounded-full transition-[width] duration-700",
+                        stage.status === "running" && "progress-shimmer",
                         stage.status === "completed"
                           ? "bg-emerald-500"
                           : stage.status === "failed"

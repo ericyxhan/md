@@ -30,7 +30,7 @@ export function ProgressBar({
         className={cn(
           "progress-fill",
           tones[tone],
-          animated && "animate-soft-pulse",
+          animated && "progress-shimmer",
         )}
         style={{ width: `${Math.max(0, Math.min(100, value))}%` }}
       />

@@ -557,7 +557,7 @@ function MembraneEmbedForm() {
       {capabilities?.prep_workflows?.membrane_embed?.enabled && (
         <>
           {formOpen && (
-            <form onSubmit={handleSubmit} className="space-y-6">
+            <form onSubmit={handleSubmit} className="space-y-6 animate-fade-up">
           <Card className="max-w-[760px]">
             <CardBody className="p-6">
               <div className="space-y-5">
